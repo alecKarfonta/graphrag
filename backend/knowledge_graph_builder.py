@@ -1,0 +1,516 @@
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+import networkx as nx
+import numpy as np
+from neo4j import GraphDatabase
+import json
+import os
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+
+@dataclass
+class Community:
+    """Represents a community of related entities."""
+    id: str
+    name: str
+    entities: List[str]
+    summary: str
+    central_entities: List[str]
+    metadata: Dict[str, Any]
+
+@dataclass
+class GraphNode:
+    """Represents a node in the knowledge graph."""
+    id: str
+    name: str
+    entity_type: str
+    properties: Dict[str, Any]
+    community_id: str | None = None
+
+@dataclass
+class GraphEdge:
+    """Represents an edge in the knowledge graph."""
+    source: str
+    target: str
+    relation_type: str
+    properties: Dict[str, Any]
+
+class KnowledgeGraphBuilder:
+    """Builds and manages knowledge graphs using Neo4j and NetworkX."""
+    
+    def __init__(self, neo4j_uri: str | None = None, neo4j_user: str | None = None, 
+                 neo4j_password: str | None = None, claude_api_key: str | None = None):
+        """Initialize the knowledge graph builder."""
+        # Neo4j connection
+        self.neo4j_uri = neo4j_uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        self.neo4j_user = neo4j_user or os.getenv("NEO4J_USER", "neo4j")
+        self.neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "password")
+        
+        # Initialize Neo4j driver
+        try:
+            self.driver = GraphDatabase.driver(self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password))
+            # Test connection
+            with self.driver.session() as session:
+                session.run("RETURN 1")
+            print("✅ Connected to Neo4j successfully")
+        except Exception as e:
+            print(f"⚠️  Neo4j connection failed: {e}")
+            self.driver = None
+        
+        # Initialize Claude for community summaries and enrichment
+        self.claude_api_key = claude_api_key or os.getenv("ANTHROPIC_API_KEY")
+        if self.claude_api_key:
+            try:
+                self.claude = ChatAnthropic(
+                    model="claude-3-sonnet-20240229",
+                    temperature=0.1,
+                    anthropic_api_key=self.claude_api_key
+                )
+                print("✅ Claude initialized successfully")
+            except Exception as e:
+                print(f"⚠️  Claude initialization failed: {e}")
+                self.claude = None
+        else:
+            print("⚠️  No Claude API key provided, using fallback methods")
+            self.claude = None
+        
+        # In-memory graph for analysis
+        self.graph = nx.Graph()
+        
+    def add_entities_and_relationships(self, entities: List[Dict], relationships: List[Dict]) -> None:
+        """Add entities and relationships to the knowledge graph."""
+        
+        # Add to Neo4j
+        if self.driver:
+            with self.driver.session() as session:
+                # Add entities
+                for entity in entities:
+                    session.run("""
+                        MERGE (e:Entity {id: $id})
+                        SET e.name = $name, e.type = $type, e.description = $description
+                        """, 
+                        id=entity["name"],
+                        name=entity["name"],
+                        type=entity["type"],
+                        description=entity.get("description", "")
+                    )
+                
+                # Add relationships
+                for rel in relationships:
+                    session.run("""
+                        MATCH (source:Entity {id: $source})
+                        MATCH (target:Entity {id: $target})
+                        MERGE (source)-[r:RELATES_TO {type: $type}]->(target)
+                        SET r.context = $context
+                        """,
+                        source=rel["source"],
+                        target=rel["target"],
+                        type=rel["relation"],
+                        context=rel.get("context", "")
+                    )
+        
+        # Add to NetworkX for analysis
+        for entity in entities:
+            self.graph.add_node(entity["name"], 
+                              type=entity["type"],
+                              description=entity.get("description", ""))
+        
+        for rel in relationships:
+            self.graph.add_edge(rel["source"], rel["target"],
+                              type=rel["relation"],
+                              context=rel.get("context", ""))
+    
+    def detect_communities(self, algorithm: str = "leiden") -> List[Community]:
+        """Detect communities in the knowledge graph."""
+        
+        if len(self.graph.nodes()) == 0:
+            return []
+        
+        communities = []
+        
+        try:
+            if algorithm == "leiden":
+                # Try Leiden algorithm
+                try:
+                    import leidenalg as la
+                    import igraph as ig
+                    
+                    # Convert NetworkX to igraph
+                    edges = list(self.graph.edges())
+                    g_ig = ig.Graph(edges)
+                    
+                    # Detect communities using Leiden
+                    partition = la.find_partition(g_ig, la.ModularityVertexPartition)
+                    
+                    # Convert back to NetworkX communities
+                    for i, community_nodes in enumerate(partition):
+                        node_names = [self.graph.nodes[node]["name"] for node in community_nodes]
+                        communities.append(self._create_community(f"community_{i}", node_names))
+                        
+                except ImportError:
+                    print("⚠️  leidenalg not available, falling back to Louvain")
+                    algorithm = "louvain"
+            
+            if algorithm == "louvain":
+                # Use Louvain algorithm
+                try:
+                    import community
+                    partition = community.best_partition(self.graph)
+                    
+                    # Group nodes by community
+                    community_groups = {}
+                    for node, comm_id in partition.items():
+                        if comm_id not in community_groups:
+                            community_groups[comm_id] = []
+                        community_groups[comm_id].append(node)
+                    
+                    # Create Community objects
+                    for comm_id, nodes in community_groups.items():
+                        communities.append(self._create_community(f"community_{comm_id}", nodes))
+                        
+                except ImportError:
+                    print("⚠️  python-louvain not available, using simple clustering")
+                    algorithm = "simple"
+            
+            if algorithm == "simple":
+                # Simple connected components approach
+                components = list(nx.connected_components(self.graph))
+                for i, component in enumerate(components):
+                    communities.append(self._create_community(f"community_{i}", list(component)))
+                    
+        except Exception as e:
+            print(f"⚠️  Community detection failed: {e}")
+            # Fallback: treat each node as its own community
+            for i, node in enumerate(self.graph.nodes()):
+                communities.append(self._create_community(f"community_{i}", [node]))
+        
+        return communities
+    
+    def _create_community(self, community_id: str, entity_names: List[str]) -> Community:
+        """Create a Community object with summary."""
+        
+        # Find central entities (nodes with highest degree)
+        central_entities = []
+        if entity_names:
+            degrees = [(name, self.graph.degree(name)) for name in entity_names if name in self.graph]
+            central_entities = [name for name, _ in sorted(degrees, key=lambda x: x[1], reverse=True)[:3]]
+        
+        # Generate summary using Claude or fallback
+        summary = self._generate_community_summary(entity_names, central_entities)
+        
+        return Community(
+            id=community_id,
+            name=f"Community {community_id}",
+            entities=entity_names,
+            summary=summary,
+            central_entities=central_entities,
+            metadata={"size": len(entity_names)}
+        )
+    
+    def _generate_community_summary(self, entity_names: List[str], central_entities: List[str]) -> str:
+        """Generate a summary for a community using Claude or fallback."""
+        
+        if not entity_names:
+            return "Empty community"
+        
+        if self.claude and len(entity_names) > 1:
+            try:
+                prompt = ChatPromptTemplate.from_template("""
+                Analyze the following group of entities and provide a brief summary of what they represent:
+                
+                Entities: {entities}
+                Central entities: {central_entities}
+                
+                Provide a 1-2 sentence summary of what this group of entities represents or what domain they belong to.
+                """)
+                
+                response = self.claude.invoke(prompt.format(
+                    entities=", ".join(entity_names),
+                    central_entities=", ".join(central_entities) if central_entities else "None"
+                ))
+                
+                return response.content.strip()
+                
+            except Exception as e:
+                print(f"⚠️  Claude summary generation failed: {e}")
+        
+        # Fallback: simple summary
+        if len(entity_names) == 1:
+            return f"Single entity: {entity_names[0]}"
+        else:
+            return f"Community with {len(entity_names)} entities, central: {', '.join(central_entities[:2])}"
+    
+    def create_hierarchical_structure(self, communities: List[Community]) -> Dict[str, Any]:
+        """Create a hierarchical structure from communities."""
+        # TODO: Implement hierarchical clustering
+        return {
+            "root": {
+                "communities": [comm.id for comm in communities],
+                "total_entities": sum(len(comm.entities) for comm in communities)
+            }
+        }
+    
+    def enrich_graph(self, enrichment_type: str = "inferred_relationships") -> List[Dict]:
+        """Enrich the knowledge graph with additional information."""
+        
+        if enrichment_type == "inferred_relationships":
+            return self._infer_relationships()
+        elif enrichment_type == "entity_properties":
+            return self._enrich_entity_properties()
+        else:
+            return []
+    
+    def _infer_relationships(self) -> List[Dict]:
+        """Infer additional relationships based on graph structure."""
+        inferred_relationships = []
+        
+        # Find entities that are 2 hops apart but not directly connected
+        for node1 in self.graph.nodes():
+            for node2 in self.graph.nodes():
+                if node1 != node2:
+                    # Check if they're 2 hops apart
+                    try:
+                        paths = list(nx.all_simple_paths(self.graph, node1, node2, cutoff=2))
+                        if len(paths) > 0 and not self.graph.has_edge(node1, node2):
+                            # They're connected via 2 hops but not directly
+                            inferred_relationships.append({
+                                "source": node1,
+                                "target": node2,
+                                "relation": "INFERRED_RELATED",
+                                "context": f"Connected via {len(paths)} paths",
+                                "confidence": 0.5
+                            })
+                    except nx.NetworkXNoPath:
+                        continue
+        
+        return inferred_relationships
+    
+    def _enrich_entity_properties(self) -> List[Dict]:
+        """Enrich entity properties using Claude."""
+        enriched_properties = []
+        
+        if not self.claude:
+            return enriched_properties
+        
+        # Get entities with descriptions
+        entities_with_descriptions = [
+            (node, data.get("description", ""))
+            for node, data in self.graph.nodes(data=True)
+            if data.get("description")
+        ]
+        
+        for entity_name, description in entities_with_descriptions[:5]:  # Limit to avoid API costs
+            try:
+                prompt = ChatPromptTemplate.from_template("""
+                Analyze the following entity and suggest additional properties that could be extracted:
+                
+                Entity: {entity_name}
+                Description: {description}
+                
+                Return as JSON:
+                {{
+                    "entity": "{entity_name}",
+                    "suggested_properties": {{
+                        "category": "string",
+                        "complexity": "low|medium|high",
+                        "importance": "low|medium|high"
+                    }}
+                }}
+                """)
+                
+                response = self.claude.invoke(prompt.format(
+                    entity_name=entity_name,
+                    description=description
+                ))
+                
+                result = json.loads(response.content)
+                enriched_properties.append(result)
+                
+            except Exception as e:
+                print(f"⚠️  Entity enrichment failed for {entity_name}: {e}")
+        
+        return enriched_properties
+    
+    def get_graph_statistics(self) -> Dict[str, Any]:
+        """Get statistics about the knowledge graph."""
+        if len(self.graph.nodes()) == 0:
+            return {"nodes": 0, "edges": 0, "communities": 0}
+        
+        return {
+            "nodes": self.graph.number_of_nodes(),
+            "edges": self.graph.number_of_edges(),
+            "density": nx.density(self.graph),
+            "average_clustering": nx.average_clustering(self.graph),
+            "connected_components": nx.number_connected_components(self.graph),
+            "average_shortest_path": nx.average_shortest_path_length(self.graph) if nx.is_connected(self.graph) else None
+        }
+    
+    def export_graph(self, format: str = "json") -> str:
+        """Export the knowledge graph in various formats."""
+        if format == "json":
+            return json.dumps({
+                "nodes": [{"id": node, **data} for node, data in self.graph.nodes(data=True)],
+                "edges": [{"source": u, "target": v, **data} for u, v, data in self.graph.edges(data=True)]
+            }, indent=2)
+        elif format == "gexf":
+            nx.write_gexf(self.graph, "knowledge_graph.gexf")
+            return "knowledge_graph.gexf"
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    def export_graph_json(self) -> Dict[str, Any]:
+        """Export the knowledge graph as JSON dictionary."""
+        return {
+            "nodes": [{"id": node, "name": node, **data} for node, data in self.graph.nodes(data=True)],
+            "edges": [{"source": u, "target": v, **data} for u, v, data in self.graph.edges(data=True)]
+        }
+    
+    def get_graph_stats(self) -> Dict[str, Any]:
+        """Get knowledge graph statistics."""
+        return self.get_graph_statistics()
+    
+    def build_graph(self, entities, relationships, domain: str = "general"):
+        """Build the knowledge graph from entities and relationships."""
+        # Convert Entity and Relationship objects to dictionaries
+        entity_dicts = []
+        for entity in entities:
+            entity_dicts.append({
+                "name": entity.name,
+                "type": entity.entity_type,
+                "description": entity.description or "",
+                "source_file": getattr(entity, 'source_chunk', None)
+            })
+        
+        relationship_dicts = []
+        for rel in relationships:
+            relationship_dicts.append({
+                "source": rel.source,
+                "target": rel.target,
+                "relation": rel.relation_type,
+                "context": rel.context or ""
+            })
+        
+        self.add_entities_and_relationships(entity_dicts, relationship_dicts)
+    
+    def clear_graph(self):
+        """Clear the knowledge graph."""
+        self.clear_knowledge_graph()
+    
+    def remove_document_entities(self, document_name: str) -> bool:
+        """Remove entities for a specific document."""
+        try:
+            removed_count = self.remove_document_from_knowledge_graph(document_name)
+            return removed_count > 0
+        except Exception:
+            return False
+    
+    def list_documents(self) -> List[str]:
+        """List document names in the knowledge graph."""
+        try:
+            documents = self.list_documents_in_knowledge_graph()
+            return [doc["name"] for doc in documents]
+        except Exception:
+            return []
+    
+    def close(self):
+        """Close the Neo4j connection."""
+        if self.driver:
+            self.driver.close()
+    
+    def clear_knowledge_graph(self):
+        """Clear all data from the knowledge graph."""
+        try:
+            # Clear Neo4j database
+            if self.driver:
+                with self.driver.session() as session:
+                    # Delete all nodes and relationships
+                    session.run("MATCH (n) DETACH DELETE n")
+                    print("Cleared all data from Neo4j knowledge graph")
+            
+            # Clear NetworkX graph
+            self.graph.clear()
+            print("Cleared in-memory knowledge graph")
+            
+        except Exception as e:
+            print(f"Error clearing knowledge graph: {e}")
+            raise
+    
+    def remove_document_from_knowledge_graph(self, document_name: str) -> int:
+        """Remove all entities and relationships for a specific document from the knowledge graph."""
+        try:
+            removed_count = 0
+            
+            if self.driver:
+                with self.driver.session() as session:
+                    # Find and delete entities from this document
+                    result = session.run("""
+                        MATCH (e:Entity)
+                        WHERE e.source_file = $document_name
+                        RETURN e.name as name
+                    """, document_name=document_name)
+                    
+                    entity_names = [record["name"] for record in result]
+                    
+                    if entity_names:
+                        # Delete relationships involving these entities
+                        session.run("""
+                            MATCH (e:Entity)
+                            WHERE e.name IN $entity_names
+                            OPTIONAL MATCH (e)-[r]-()
+                            DELETE r
+                        """, entity_names=entity_names)
+                        
+                        # Delete the entities
+                        session.run("""
+                            MATCH (e:Entity)
+                            WHERE e.name IN $entity_names
+                            DELETE e
+                        """, entity_names=entity_names)
+                        
+                        removed_count = len(entity_names)
+                        print(f"Removed {removed_count} entities for document: {document_name}")
+            
+            # Update NetworkX graph
+            nodes_to_remove = []
+            for node in self.graph.nodes():
+                if self.graph.nodes[node].get("source_file") == document_name:
+                    nodes_to_remove.append(node)
+            
+            for node in nodes_to_remove:
+                self.graph.remove_node(node)
+            
+            return removed_count
+            
+        except Exception as e:
+            print(f"Error removing document from knowledge graph: {e}")
+            return 0
+    
+    def list_documents_in_knowledge_graph(self) -> List[Dict[str, Any]]:
+        """List all documents in the knowledge graph."""
+        try:
+            documents = {}
+            
+            if self.driver:
+                with self.driver.session() as session:
+                    # Get all entities grouped by source file
+                    result = session.run("""
+                        MATCH (e:Entity)
+                        WHERE e.source_file IS NOT NULL
+                        RETURN e.source_file as source_file, count(e) as entity_count
+                    """)
+                    
+                    for record in result:
+                        source_file = record["source_file"]
+                        entity_count = record["entity_count"]
+                        
+                        documents[source_file] = {
+                            "name": source_file,
+                            "entities": entity_count,
+                            "relationships": 0  # Would need separate query for relationship count
+                        }
+            
+            return list(documents.values())
+            
+        except Exception as e:
+            print(f"Error listing documents in knowledge graph: {e}")
+            return [] 

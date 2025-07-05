@@ -1,0 +1,42 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+pydantic>=2.5.0
+python-dotenv==1.0.0
+
+# Database
+neo4j==5.14.1
+qdrant-client==1.7.0
+
+# Document processing
+pymupdf==1.23.8
+python-docx==1.1.0
+beautifulsoup4==4.12.2
+pandas==2.1.4
+openpyxl==3.1.2
+
+# LLM and embeddings
+langchain==0.1.0
+langchain-openai==0.0.5
+langchain-anthropic==0.1.0
+langchain-community==0.0.10
+sentence-transformers==2.2.2
+
+# Text processing
+spacy==3.7.2
+nltk==3.8.1
+
+# Graph analysis
+networkx==3.2.1
+numpy>=1.26.0
+
+# Web scraping
+firecrawl-py==2.15.0
+wikipedia-api==0.6.0
+
+# Utilities
+requests==2.31.0
+
+huggingface_hub<0.15.0
+
+transformers==4.29.2
