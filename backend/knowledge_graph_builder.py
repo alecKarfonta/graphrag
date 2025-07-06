@@ -83,11 +83,12 @@ class KnowledgeGraphBuilder:
         # Add to Neo4j
         if self.driver:
             with self.driver.session() as session:
-                # Add entities
+                # Add entities with occurrence tracking
                 for entity in entities:
                     session.run("""
                         MERGE (e:Entity {id: $id})
-                        SET e.name = $name, e.type = $type, e.description = $description
+                        ON CREATE SET e.name = $name, e.type = $type, e.description = $description, e.occurrence = 1
+                        ON MATCH SET e.occurrence = e.occurrence + 1
                         """, 
                         id=entity["name"],
                         name=entity["name"],
@@ -95,13 +96,14 @@ class KnowledgeGraphBuilder:
                         description=entity.get("description", "")
                     )
                 
-                # Add relationships
+                # Add relationships with occurrence tracking
                 for rel in relationships:
                     session.run("""
                         MATCH (source:Entity {id: $source})
                         MATCH (target:Entity {id: $target})
                         MERGE (source)-[r:RELATES_TO {type: $type}]->(target)
-                        SET r.context = $context
+                        ON CREATE SET r.context = $context, r.weight = 1
+                        ON MATCH SET r.weight = r.weight + 1
                         """,
                         source=rel["source"],
                         target=rel["target"],
@@ -109,16 +111,35 @@ class KnowledgeGraphBuilder:
                         context=rel.get("context", "")
                     )
         
-        # Add to NetworkX for analysis
+        # Add to NetworkX for analysis with occurrence tracking
         for entity in entities:
-            self.graph.add_node(entity["name"], 
-                              type=entity["type"],
-                              description=entity.get("description", ""))
+            entity_name = entity["name"]
+            if entity_name in self.graph:
+                # Increment occurrence count
+                current_occurrence = self.graph.nodes[entity_name].get("occurrence", 1)
+                self.graph.nodes[entity_name]["occurrence"] = current_occurrence + 1
+            else:
+                # Add new node with occurrence count
+                self.graph.add_node(entity_name, 
+                                  type=entity["type"],
+                                  description=entity.get("description", ""),
+                                  occurrence=1)
         
         for rel in relationships:
-            self.graph.add_edge(rel["source"], rel["target"],
-                              type=rel["relation"],
-                              context=rel.get("context", ""))
+            source = rel["source"]
+            target = rel["target"]
+            rel_type = rel["relation"]
+            
+            if self.graph.has_edge(source, target):
+                # Increment weight for existing edge
+                current_weight = self.graph.edges[source, target].get("weight", 1)
+                self.graph.edges[source, target]["weight"] = current_weight + 1
+            else:
+                # Add new edge with weight
+                self.graph.add_edge(source, target,
+                                  type=rel_type,
+                                  context=rel.get("context", ""),
+                                  weight=1)
     
     def detect_communities(self, algorithm: str = "leiden") -> List[Community]:
         """Detect communities in the knowledge graph."""
@@ -361,8 +382,8 @@ class KnowledgeGraphBuilder:
     def export_graph_json(self) -> Dict[str, Any]:
         """Export the knowledge graph as JSON dictionary."""
         return {
-            "nodes": [{"id": node, "name": node, **data} for node, data in self.graph.nodes(data=True)],
-            "edges": [{"source": u, "target": v, **data} for u, v, data in self.graph.edges(data=True)]
+            "nodes": [{"id": node, "label": node, "type": data.get("type", "UNKNOWN"), "occurrence": data.get("occurrence", 1), **data} for node, data in self.graph.nodes(data=True)],
+            "edges": [{"source": u, "target": v, "type": data.get("type", "RELATES_TO"), "weight": data.get("weight", 1), **data} for u, v, data in self.graph.edges(data=True)]
         }
     
     def get_graph_stats(self) -> Dict[str, Any]:
@@ -513,4 +534,14 @@ class KnowledgeGraphBuilder:
             
         except Exception as e:
             print(f"Error listing documents in knowledge graph: {e}")
-            return [] 
+            return []
+    
+    def get_direct_relationships(self, entity_name: str) -> list:
+        """Return a list of (target, relation_type) for all direct relationships from the given entity."""
+        if entity_name not in self.graph:
+            return []
+        relationships = []
+        for neighbor in self.graph.neighbors(entity_name):
+            rel_type = self.graph.edges[entity_name, neighbor].get("type", "RELATED")
+            relationships.append((neighbor, rel_type))
+        return relationships 

@@ -26,9 +26,10 @@ sentence-transformers==2.2.2
 spacy==3.7.2
 nltk==3.8.1
 
-# Graph analysis
+# Graph analysis and machine learning
 networkx==3.2.1
 numpy>=1.26.0
+scikit-learn==1.3.2
 
 # Web scraping
 firecrawl-py==2.15.0

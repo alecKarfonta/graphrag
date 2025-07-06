@@ -16,6 +16,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - DISABLE_LLM_FALLBACK=${DISABLE_LLM_FALLBACK:-false}
       - DEBUG=True
       - LOG_LEVEL=INFO
     depends_on:
@@ -86,6 +87,38 @@ services:
       - graphrag-network
     restart: unless-stopped
 
+  # NER API Service
+  ner-api:
+    build:
+      context: ./ner_api
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - HF_HOME=/app/.cache/huggingface
+      - TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
+    volumes:
+      - ner_cache:/app/.cache
+    networks:
+      - graphrag-network
+    restart: unless-stopped
+
+  # Relationship Extraction API Service
+  rel-api:
+    build:
+      context: ./rel_api
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - HF_HOME=/app/.cache/huggingface
+      - TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
+    volumes:
+      - rel_cache:/app/.cache
+    networks:
+      - graphrag-network
+    restart: unless-stopped
+
 volumes:
   api_data:
   neo4j_data:
@@ -94,6 +127,8 @@ volumes:
   neo4j_plugins:
   qdrant_data:
   redis_data:
+  ner_cache:
+  rel_cache:
 
 networks:
   graphrag-network:

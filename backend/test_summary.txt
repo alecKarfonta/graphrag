@@ -1,0 +1,32 @@
+================================================================================
+GRAPH RAG SYSTEM TEST SUMMARY
+================================================================================
+Generated: 2025-07-06 01:03:34
+
+UNIT TESTS
+--------------------
+Total Tests: 7
+Passed Tests: 7
+Success Rate: 100.0%
+
+INTEGRATION TESTS
+--------------------
+Total Tests: 4
+Passed Tests: 3
+Success Rate: 75.0%
+
+PERFORMANCE TESTS
+--------------------
+Average Response Time: 0.02s
+Performance Score: 60.0%
+
+QUALITY TESTS
+--------------------
+Average Accuracy: 12.7%
+Quality Score: 12.7%
+
+OVERALL SYSTEM SCORE
+--------------------
+Overall Score: 67.0%
+
+================================================================================

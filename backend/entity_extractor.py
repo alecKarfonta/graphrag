@@ -5,6 +5,8 @@ from langchain_core.prompts import ChatPromptTemplate
 import json
 import re
 import os
+from ner_client import get_ner_client, is_ner_available
+from rel_extractor import get_relationship_extractor
 
 @dataclass
 class Entity:
@@ -37,18 +39,33 @@ class ExtractionResult:
 class EntityExtractor:
     """LLM-based entity and relationship extractor using Claude."""
     
-    def __init__(self, model_name: str = "claude-3-sonnet-20240229", api_key: str | None = None):
+    def __init__(self, model_name: str = "claude-3-sonnet-20240229", api_key: str | None = None, disable_llm_fallback: bool = True):
         """Initialize the entity extractor with Claude."""
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("Anthropic API key is required. Set ANTHROPIC_API_KEY environment variable.")
+        self.disable_llm_fallback = disable_llm_fallback or os.getenv("DISABLE_LLM_FALLBACK", "false").lower() == "true"
         
-        self.llm = ChatAnthropic(
-            model=model_name,
-            temperature=0.1,
-            max_tokens=2048,
-            anthropic_api_key=self.api_key
-        )
+        # Always initialize LLM for response generation, regardless of disable_llm_fallback
+        if self.api_key:
+            try:
+                self.llm = ChatAnthropic(
+                    model=model_name,
+                    temperature=0.1,
+                    max_tokens=2048,
+                    anthropic_api_key=self.api_key
+                )
+                print("✅ LLM initialized for response generation")
+            except Exception as e:
+                print(f"⚠️ Could not initialize LLM: {e}")
+                self.llm = None
+        else:
+            print("⚠️ No ANTHROPIC_API_KEY found. LLM features will be disabled.")
+            self.llm = None
+        
+        # Check if we should disable LLM fallback for entity/relationship extraction
+        if self.disable_llm_fallback:
+            print("ℹ️ LLM fallback disabled for entity/relationship extraction (will use local models only)")
+        else:
+            print("ℹ️ LLM fallback enabled for entity/relationship extraction")
         
         # Define entity types for different domains
         self.entity_types = {
@@ -69,7 +86,622 @@ class EntityExtractor:
         }
     
     def extract_entities_and_relations(self, text_chunk: str, domain: str = "general") -> ExtractionResult:
-        """Extract entities and relationships from text using Claude."""
+        """Extract entities and relationships from text using local NER API first, then GLiNER, then fall back to Claude."""
+        # First, try to use the local NER API
+        if is_ner_available():
+            try:
+                print(f"🔍 Using local NER API for entity extraction...")
+                ner_client = get_ner_client()
+                ner_result = ner_client.extract_entities(text_chunk)
+                
+                if ner_result and "entities" in ner_result:
+                    print(f"🔍 NER API returned {len(ner_result['entities'])} entities")
+                    # Convert NER API results to our Entity format
+                    entities = []
+                    for ner_entity in ner_result["entities"]:
+                        # Map NER entity types to our domain types
+                        entity_type = self._map_ner_entity_type(ner_entity["entity"], domain)
+                        entity = Entity(
+                            name=ner_entity["word"],
+                            entity_type=entity_type,
+                            description=f"Extracted by local NER model (confidence: {ner_entity['score']:.3f})",
+                            confidence=ner_entity["score"],
+                            source_chunk=text_chunk,
+                            metadata={
+                                "domain": domain,
+                                "ner_source": "local_model",
+                                "original_ner_type": ner_entity["entity"]
+                            }
+                        )
+                        entities.append(entity)
+                    if entities:
+                        print(f"✅ Local NER found {len(entities)} entities")
+                        # Try GLiNER for relationship extraction
+                        rel_extractor = get_relationship_extractor()
+                        if rel_extractor.is_available():
+                            try:
+                                print(f"🔗 Using GLiNER for relationship extraction...")
+                                # Use a focused set of relationships that are more likely to be found in real text
+                                default_relations = [
+                                    # Business/Organizational relationships
+                                    {"relation": "works for", "pairs_filter": [("person", "organisation")]},
+                                    {"relation": "founded", "pairs_filter": [("person", "organisation")]},
+                                    {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
+                                    {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
+                                    {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
+                                    {"relation": "produces", "pairs_filter": [("organisation", "product")]},
+                                    {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
+                                    
+                                    # Technical/Component relationships (simplified)
+                                    {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "connects to", "pairs_filter": [("component", "component")]},
+                                    {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "controls", "pairs_filter": [("component", "component")]},
+                                    {"relation": "supplies", "pairs_filter": [("component", "component")]},
+                                    {"relation": "replaces", "pairs_filter": [("component", "component")]},
+                                    {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
+                                    {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
+                                    {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
+                                    {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
+                                    
+                                    # Temporal relationships
+                                    {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
+                                    {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
+                                    
+                                    # Specification relationships
+                                    {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                    {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                    
+                                    # General relationships (less restrictive filters)
+                                    {"relation": "related to", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
+                                    {"relation": "associated with", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
+                                    {"relation": "depends on", "pairs_filter": [("component", "component"), ("system", "component"), ("procedure", "component")]},
+                                    {"relation": "affects", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
+                                    {"relation": "influences", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
+                                    {"relation": "supports", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "enables", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "prevents", "pairs_filter": [("component", "component"), ("safety", "component")]},
+                                    {"relation": "protects", "pairs_filter": [("component", "component"), ("safety", "component")]},
+                                    {"relation": "monitors", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "regulates", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "operates", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "manages", "pairs_filter": [("component", "component"), ("system", "component"), ("person", "organisation")]},
+                                    {"relation": "directs", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                                    {"relation": "leads", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                                    {"relation": "owns", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                                    {"relation": "invests in", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                                    {"relation": "collaborates with", "pairs_filter": [("organisation", "organisation"), ("person", "organisation")]},
+                                    {"relation": "competes with", "pairs_filter": [("organisation", "organisation")]},
+                                    {"relation": "partners with", "pairs_filter": [("organisation", "organisation")]},
+                                ]
+                                entity_labels = list({e.entity_type.lower() for e in entities})
+                                gliner_result = rel_extractor.extract_relations(
+                                    text=text_chunk,
+                                    relations=default_relations,
+                                    entity_labels=entity_labels,
+                                    threshold=0.5
+                                )
+                                relationships = []
+                                for rel in gliner_result.get("relations", []):
+                                    relationships.append(Relationship(
+                                        source=rel.get("source") or rel.get("text", ""),
+                                        target=rel.get("target", ""),
+                                        relation_type=rel.get("label", rel.get("relation", "")),
+                                        context=rel.get("context", None),
+                                        confidence=rel.get("score", 1.0),
+                                        metadata={"extraction_method": "gliner"}
+                                    ))
+                                
+                                # Apply validation and filtering
+                                entities = self.validate_entities(entities)
+                                relationships = self.validate_relationships(relationships, entities)
+                                
+                                print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                                
+                                return ExtractionResult(
+                                    entities=entities,
+                                    relationships=relationships,
+                                    claims=[],
+                                    source_chunk=text_chunk
+                                )
+                            except Exception as e:
+                                print(f"⚠️ GLiNER relationship extraction failed: {e}, falling back to LLM")
+                        # Use LLM only for relationship extraction if GLiNER is unavailable or fails
+                        relationships, claims = self._extract_relationships_with_llm(text_chunk, entities, domain)
+                        
+                        # Apply validation and filtering
+                        entities = self.validate_entities(entities)
+                        relationships = self.validate_relationships(relationships, entities)
+                        
+                        print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                        
+                        return ExtractionResult(
+                            entities=entities,
+                            relationships=relationships,
+                            claims=claims,
+                            source_chunk=text_chunk
+                        )
+                    else:
+                        print(f"⚠️ Local NER returned no valid entities, trying GLiNER for entity extraction...")
+                        # Try GLiNER for entity extraction when local NER fails
+                        rel_extractor = get_relationship_extractor()
+                        if rel_extractor.is_available():
+                            try:
+                                print(f"🔍 Using GLiNER for entity extraction...")
+                                # Use GLiNER to extract entities
+                                gliner_entities = rel_extractor.extract_entities(
+                                    text=text_chunk,
+                                    labels=["person", "organisation", "location", "date", "product", "component", "system", "procedure", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time"],
+                                    threshold=0.5
+                                )
+                                
+                                if gliner_entities.get("entities"):
+                                    print(f"✅ GLiNER found {len(gliner_entities['entities'])} entities")
+                                    entities = []
+                                    for gliner_entity in gliner_entities["entities"]:
+                                        entity = Entity(
+                                            name=gliner_entity["text"],
+                                            entity_type=gliner_entity["label"].upper(),
+                                            description=f"Extracted by GLiNER model (confidence: {gliner_entity['score']:.3f})",
+                                            confidence=gliner_entity["score"],
+                                            source_chunk=text_chunk,
+                                            metadata={
+                                                "domain": domain,
+                                                "ner_source": "gliner_model",
+                                                "original_ner_type": gliner_entity["label"]
+                                            }
+                                        )
+                                        entities.append(entity)
+                                    
+                                    # Now extract relationships with GLiNER
+                                    print(f"🔗 Using GLiNER for relationship extraction...")
+                                    default_relations = [
+                                        # Business/Organizational relationships
+                                        {"relation": "works for", "pairs_filter": [("person", "organisation")]},
+                                        {"relation": "founded", "pairs_filter": [("person", "organisation")]},
+                                        {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
+                                        {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
+                                        {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
+                                        {"relation": "produces", "pairs_filter": [("organisation", "product")]},
+                                        {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
+                                        
+                                        # Technical/Component relationships (simplified)
+                                        {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                        {"relation": "connects to", "pairs_filter": [("component", "component")]},
+                                        {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                        {"relation": "controls", "pairs_filter": [("component", "component")]},
+                                        {"relation": "supplies", "pairs_filter": [("component", "component")]},
+                                        {"relation": "replaces", "pairs_filter": [("component", "component")]},
+                                        {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
+                                        {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
+                                        {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
+                                        {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
+                                        
+                                        # Temporal relationships
+                                        {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
+                                        {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
+                                        
+                                        # Specification relationships
+                                        {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                        {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                    ]
+                                    entity_labels = list({e.entity_type.lower() for e in entities})
+                                    gliner_result = rel_extractor.extract_relations(
+                                        text=text_chunk,
+                                        relations=default_relations,
+                                        entity_labels=entity_labels,
+                                        threshold=0.5
+                                    )
+                                    relationships = []
+                                    for rel in gliner_result.get("relations", []):
+                                        relationships.append(Relationship(
+                                            source=rel.get("source") or rel.get("text", ""),
+                                            target=rel.get("target", ""),
+                                            relation_type=rel.get("label", rel.get("relation", "")),
+                                            context=rel.get("context", None),
+                                            confidence=rel.get("score", 1.0),
+                                            metadata={"extraction_method": "gliner"}
+                                        ))
+                                    
+                                    # Apply validation and filtering
+                                    entities = self.validate_entities(entities)
+                                    relationships = self.validate_relationships(relationships, entities)
+                                    
+                                    print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                                    
+                                    return ExtractionResult(
+                                        entities=entities,
+                                        relationships=relationships,
+                                        claims=[],
+                                        source_chunk=text_chunk
+                                    )
+                                else:
+                                    if self.disable_llm_fallback:
+                                        print(f"⚠️ GLiNER also returned no entities, LLM fallback disabled - skipping extraction")
+                                        return ExtractionResult(
+                                            entities=[],
+                                            relationships=[],
+                                            claims=[],
+                                            source_chunk=text_chunk
+                                        )
+                                    else:
+                                        print(f"⚠️ GLiNER also returned no entities, falling back to LLM")
+                            except Exception as e:
+                                if self.disable_llm_fallback:
+                                    print(f"⚠️ GLiNER entity extraction failed: {e}, LLM fallback disabled - skipping extraction")
+                                    return ExtractionResult(
+                                        entities=[],
+                                        relationships=[],
+                                        claims=[],
+                                        source_chunk=text_chunk
+                                    )
+                                else:
+                                    print(f"⚠️ GLiNER entity extraction failed: {e}, falling back to LLM")
+                        else:
+                            if self.disable_llm_fallback:
+                                print(f"⚠️ GLiNER not available, LLM fallback disabled - skipping extraction")
+                                return ExtractionResult(
+                                    entities=[],
+                                    relationships=[],
+                                    claims=[],
+                                    source_chunk=text_chunk
+                                )
+                            else:
+                                print(f"⚠️ GLiNER not available, falling back to LLM")
+                else:
+                    print(f"⚠️ Local NER API returned no entities or invalid response, trying GLiNER...")
+                    # Try GLiNER for entity extraction when local NER fails
+                    rel_extractor = get_relationship_extractor()
+                    if rel_extractor.is_available():
+                        try:
+                            print(f"🔍 Using GLiNER for entity extraction...")
+                            # Use GLiNER to extract entities
+                            gliner_entities = rel_extractor.extract_entities(
+                                text=text_chunk,
+                                labels=["person", "organisation", "location", "date", "product", "component", "system", "procedure", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time"],
+                                threshold=0.5
+                            )
+                            
+                            if gliner_entities.get("entities"):
+                                print(f"✅ GLiNER found {len(gliner_entities['entities'])} entities")
+                                entities = []
+                                for gliner_entity in gliner_entities["entities"]:
+                                    entity = Entity(
+                                        name=gliner_entity["text"],
+                                        entity_type=gliner_entity["label"].upper(),
+                                        description=f"Extracted by GLiNER model (confidence: {gliner_entity['score']:.3f})",
+                                        confidence=gliner_entity["score"],
+                                        source_chunk=text_chunk,
+                                        metadata={
+                                            "domain": domain,
+                                            "ner_source": "gliner_model",
+                                            "original_ner_type": gliner_entity["label"]
+                                        }
+                                    )
+                                    entities.append(entity)
+                                
+                                # Now extract relationships with GLiNER
+                                print(f"🔗 Using GLiNER for relationship extraction...")
+                                default_relations = [
+                                    # Business/Organizational relationships
+                                    {"relation": "works for", "pairs_filter": [("person", "organisation")]},
+                                    {"relation": "founded", "pairs_filter": [("person", "organisation")]},
+                                    {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
+                                    {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
+                                    {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
+                                    {"relation": "produces", "pairs_filter": [("organisation", "product")]},
+                                    {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
+                                    
+                                    # Technical/Component relationships (simplified)
+                                    {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "connects to", "pairs_filter": [("component", "component")]},
+                                    {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                    {"relation": "controls", "pairs_filter": [("component", "component")]},
+                                    {"relation": "supplies", "pairs_filter": [("component", "component")]},
+                                    {"relation": "replaces", "pairs_filter": [("component", "component")]},
+                                    {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
+                                    {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
+                                    {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
+                                    {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
+                                    
+                                    # Temporal relationships
+                                    {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
+                                    {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
+                                    
+                                    # Specification relationships
+                                    {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                    {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                ]
+                                entity_labels = list({e.entity_type.lower() for e in entities})
+                                gliner_result = rel_extractor.extract_relations(
+                                    text=text_chunk,
+                                    relations=default_relations,
+                                    entity_labels=entity_labels,
+                                    threshold=0.5
+                                )
+                                relationships = []
+                                for rel in gliner_result.get("relations", []):
+                                    relationships.append(Relationship(
+                                        source=rel.get("source") or rel.get("text", ""),
+                                        target=rel.get("target", ""),
+                                        relation_type=rel.get("label", rel.get("relation", "")),
+                                        context=rel.get("context", None),
+                                        confidence=rel.get("score", 1.0),
+                                        metadata={"extraction_method": "gliner"}
+                                    ))
+                                
+                                # Apply validation and filtering
+                                entities = self.validate_entities(entities)
+                                relationships = self.validate_relationships(relationships, entities)
+                                
+                                print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                                
+                                return ExtractionResult(
+                                    entities=entities,
+                                    relationships=relationships,
+                                    claims=[],
+                                    source_chunk=text_chunk
+                                )
+                            else:
+                                if self.disable_llm_fallback:
+                                    print(f"⚠️ GLiNER also returned no entities, LLM fallback disabled - skipping extraction")
+                                    return ExtractionResult(
+                                        entities=[],
+                                        relationships=[],
+                                        claims=[],
+                                        source_chunk=text_chunk
+                                    )
+                                else:
+                                    print(f"⚠️ GLiNER also returned no entities, falling back to LLM")
+                        except Exception as e:
+                            if self.disable_llm_fallback:
+                                print(f"⚠️ GLiNER entity extraction failed: {e}, LLM fallback disabled - skipping extraction")
+                                return ExtractionResult(
+                                    entities=[],
+                                    relationships=[],
+                                    claims=[],
+                                    source_chunk=text_chunk
+                                )
+                            else:
+                                print(f"⚠️ GLiNER entity extraction failed: {e}, falling back to LLM")
+                    else:
+                        if self.disable_llm_fallback:
+                            print(f"⚠️ GLiNER not available, LLM fallback disabled - skipping extraction")
+                            return ExtractionResult(
+                                entities=[],
+                                relationships=[],
+                                claims=[],
+                                source_chunk=text_chunk
+                            )
+                        else:
+                            print(f"⚠️ GLiNER not available, falling back to LLM")
+            except Exception as e:
+                print(f"⚠️ Local NER API failed: {e}, trying GLiNER...")
+                # Try GLiNER for entity extraction when local NER fails
+                rel_extractor = get_relationship_extractor()
+                if rel_extractor.is_available():
+                    try:
+                        print(f"🔍 Using GLiNER for entity extraction...")
+                        # Use GLiNER to extract entities
+                        gliner_entities = rel_extractor.extract_entities(
+                            text=text_chunk,
+                            labels=["person", "organisation", "location", "date", "product", "component", "system", "procedure", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time"],
+                            threshold=0.5
+                        )
+                        
+                        if gliner_entities.get("entities"):
+                            print(f"✅ GLiNER found {len(gliner_entities['entities'])} entities")
+                            entities = []
+                            for gliner_entity in gliner_entities["entities"]:
+                                entity = Entity(
+                                    name=gliner_entity["text"],
+                                    entity_type=gliner_entity["label"].upper(),
+                                    description=f"Extracted by GLiNER model (confidence: {gliner_entity['score']:.3f})",
+                                    confidence=gliner_entity["score"],
+                                    source_chunk=text_chunk,
+                                    metadata={
+                                        "domain": domain,
+                                        "ner_source": "gliner_model",
+                                        "original_ner_type": gliner_entity["label"]
+                                    }
+                                )
+                                entities.append(entity)
+                            
+                            # Now extract relationships with GLiNER
+                            print(f"🔗 Using GLiNER for relationship extraction...")
+                            default_relations = [
+                                # Business/Organizational relationships
+                                {"relation": "works for", "pairs_filter": [("person", "organisation")]},
+                                {"relation": "founded", "pairs_filter": [("person", "organisation")]},
+                                {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
+                                {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
+                                {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
+                                {"relation": "produces", "pairs_filter": [("organisation", "product")]},
+                                {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
+                                
+                                # Technical/Component relationships (simplified)
+                                {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                {"relation": "connects to", "pairs_filter": [("component", "component")]},
+                                {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
+                                {"relation": "controls", "pairs_filter": [("component", "component")]},
+                                {"relation": "supplies", "pairs_filter": [("component", "component")]},
+                                {"relation": "replaces", "pairs_filter": [("component", "component")]},
+                                {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
+                                {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
+                                {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
+                                {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
+                                
+                                # Temporal relationships
+                                {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
+                                {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
+                                
+                                # Specification relationships
+                                {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                                {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                            ]
+                            entity_labels = list({e.entity_type.lower() for e in entities})
+                            gliner_result = rel_extractor.extract_relations(
+                                text=text_chunk,
+                                relations=default_relations,
+                                entity_labels=entity_labels,
+                                threshold=0.5
+                            )
+                            relationships = []
+                            for rel in gliner_result.get("relations", []):
+                                relationships.append(Relationship(
+                                    source=rel.get("source") or rel.get("text", ""),
+                                    target=rel.get("target", ""),
+                                    relation_type=rel.get("label", rel.get("relation", "")),
+                                    context=rel.get("context", None),
+                                    confidence=rel.get("score", 1.0),
+                                    metadata={"extraction_method": "gliner"}
+                                ))
+                            
+                            # Apply validation and filtering
+                            entities = self.validate_entities(entities)
+                            relationships = self.validate_relationships(relationships, entities)
+                            
+                            print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                            
+                            return ExtractionResult(
+                                entities=entities,
+                                relationships=relationships,
+                                claims=[],
+                                source_chunk=text_chunk
+                            )
+                        else:
+                            if self.disable_llm_fallback:
+                                print(f"⚠️ GLiNER also returned no entities, LLM fallback disabled - skipping extraction")
+                                return ExtractionResult(
+                                    entities=[],
+                                    relationships=[],
+                                    claims=[],
+                                    source_chunk=text_chunk
+                                )
+                            else:
+                                print(f"⚠️ GLiNER also returned no entities, falling back to LLM")
+                    except Exception as e:
+                        if self.disable_llm_fallback:
+                            print(f"⚠️ GLiNER entity extraction failed: {e}, LLM fallback disabled - skipping extraction")
+                            return ExtractionResult(
+                                entities=[],
+                                relationships=[],
+                                claims=[],
+                                source_chunk=text_chunk
+                            )
+                        else:
+                            print(f"⚠️ GLiNER entity extraction failed: {e}, falling back to LLM")
+                else:
+                    if self.disable_llm_fallback:
+                        print(f"⚠️ GLiNER not available, LLM fallback disabled - skipping extraction")
+                        return ExtractionResult(
+                            entities=[],
+                            relationships=[],
+                            claims=[],
+                            source_chunk=text_chunk
+                        )
+                    else:
+                        print(f"⚠️ GLiNER not available, falling back to LLM")
+        
+        # Fall back to LLM-based extraction (only if not disabled)
+        if self.disable_llm_fallback:
+            print(f"⚠️ LLM fallback disabled - skipping extraction")
+            return ExtractionResult(
+                entities=[],
+                relationships=[],
+                claims=[],
+                source_chunk=text_chunk
+            )
+        else:
+            print(f"🔍 Using LLM-based entity extraction...")
+            return self._extract_with_llm(text_chunk, domain)
+    
+    def _map_ner_entity_type(self, ner_type: str, domain: str) -> str:
+        """Map NER entity types to domain-specific types."""
+        # Remove I- prefix from NER types (e.g., I-PER -> PER)
+        clean_type = ner_type.replace("I-", "").replace("B-", "")
+        
+        # Map to domain-specific types
+        type_mapping = {
+            "PER": "PERSON",
+            "ORG": "ORGANIZATION", 
+            "LOC": "LOCATION",
+            "MISC": "CONCEPT"
+        }
+        
+        return type_mapping.get(clean_type, "CONCEPT")
+    
+    def _extract_relationships_with_llm(self, text_chunk: str, entities: List[Entity], domain: str) -> tuple[List[Relationship], List[str]]:
+        """Extract relationships using LLM given the entities."""
+        # Check if LLM fallback is disabled
+        if self.disable_llm_fallback:
+            print(f"⚠️ LLM fallback disabled for relationship extraction - skipping")
+            return [], []
+        
+        if not self.llm:
+            return [], []
+        
+        # Create a focused prompt for relationship extraction
+        entity_names = [e.name for e in entities]
+        entity_text = ", ".join(entity_names)
+        
+        prompt = ChatPromptTemplate.from_template("""
+        Given these entities: {entities}
+        
+        Extract relationships between these entities from the text below.
+        
+        Return JSON with this exact format:
+        {{
+            "relationships": [
+                {{
+                    "source": "Source Entity",
+                    "target": "Target Entity", 
+                    "relation": "RELATES_TO|PART_OF|CONTAINS|CAUSES|REQUIRES",
+                    "context": "Brief context",
+                    "confidence": 0.9
+                }}
+            ],
+            "claims": ["Important fact 1", "Important fact 2"]
+        }}
+        
+        Text: {text}
+        """)
+        
+        try:
+            response = self.llm.invoke(prompt.format(entities=entity_text, text=text_chunk))
+            result_data = self._parse_claude_response(response.content)
+            
+            relationships = []
+            for rel_data in result_data.get("relationships", []):
+                relationship = Relationship(
+                    source=rel_data["source"],
+                    target=rel_data["target"],
+                    relation_type=rel_data["relation"],
+                    context=rel_data.get("context"),
+                    confidence=rel_data.get("confidence", 1.0),
+                    metadata={"domain": domain, "extraction_method": "llm"}
+                )
+                relationships.append(relationship)
+            
+            claims = result_data.get("claims", [])
+            return relationships, claims
+            
+        except Exception as e:
+            print(f"Error in LLM relationship extraction: {e}")
+            return [], []
+    
+    def _extract_with_llm(self, text_chunk: str, domain: str) -> ExtractionResult:
+        """Extract entities and relationships using LLM (fallback method)."""
+        
+        # Check if LLM fallback is disabled
+        if self.disable_llm_fallback:
+            print(f"⚠️ LLM fallback disabled - skipping extraction")
+            return ExtractionResult(
+                entities=[],
+                relationships=[],
+                claims=[],
+                source_chunk=text_chunk
+            )
         
         # Get entity and relationship types for the domain
         entity_types = self.entity_types.get(domain, self.entity_types["general"])
@@ -121,7 +753,7 @@ class EntityExtractor:
                     description=entity_data.get("description"),
                     confidence=entity_data.get("confidence", 1.0),
                     source_chunk=text_chunk,
-                    metadata={"domain": domain}
+                    metadata={"domain": domain, "extraction_method": "llm"}
                 )
                 entities.append(entity)
             
@@ -133,11 +765,17 @@ class EntityExtractor:
                     relation_type=rel_data["relation"],
                     context=rel_data.get("context"),
                     confidence=rel_data.get("confidence", 1.0),
-                    metadata={"domain": domain}
+                    metadata={"domain": domain, "extraction_method": "llm"}
                 )
                 relationships.append(relationship)
             
             claims = result_data.get("claims", [])
+            
+            # Apply validation and filtering
+            entities = self.validate_entities(entities)
+            relationships = self.validate_relationships(relationships, entities)
+            
+            print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
             
             return ExtractionResult(
                 entities=entities,
@@ -166,8 +804,9 @@ class EntityExtractor:
         return self.extract_entities_and_relations(enhanced_text, domain)
     
     def validate_entities(self, entities: List[Entity]) -> List[Entity]:
-        """Validate and clean extracted entities."""
+        """Validate and clean extracted entities with proper deduplication."""
         validated_entities = []
+        seen_entities = set()  # Track normalized entity names
         
         for entity in entities:
             # Basic validation
@@ -177,26 +816,109 @@ class EntityExtractor:
             # Clean entity name
             entity.name = entity.name.strip()
             
-            # Remove duplicates (simple exact match)
-            if not any(e.name == entity.name and e.entity_type == entity.entity_type 
-                      for e in validated_entities):
-                validated_entities.append(entity)
+            # Normalize for deduplication (lowercase, remove extra spaces)
+            normalized_name = " ".join(entity.name.lower().split())
+            
+            # Skip if we've seen this entity before (case-insensitive)
+            if normalized_name in seen_entities:
+                continue
+            
+            # Additional quality checks
+            if self._is_low_quality_entity(entity):
+                continue
+            
+            seen_entities.add(normalized_name)
+            validated_entities.append(entity)
         
         return validated_entities
     
+    def _is_low_quality_entity(self, entity: Entity) -> bool:
+        """Check if entity is low quality and should be filtered out."""
+        name = entity.name.lower()
+        
+        # Filter out common noise
+        noise_patterns = [
+            r'^\d+$',  # Just numbers
+            r'^[a-z]$',  # Single letter
+            r'^[^\w\s]+$',  # Just punctuation
+            r'^(the|a|an|and|or|but|in|on|at|to|for|of|with|by|from|up|down|out|off|over|under|above|below|before|after|during|while|since|until|unless|if|then|else|when|where|why|how|what|which|who|whom|whose|that|this|these|those|it|its|they|them|their|we|us|our|you|your|he|him|his|she|her|hers|i|me|my|mine)$',  # Common words
+        ]
+        
+        for pattern in noise_patterns:
+            if re.match(pattern, name):
+                return True
+        
+        # Filter out very short entities (unless they're abbreviations)
+        if len(name) < 2 and not name.isupper():
+            return True
+        
+        # Filter out entities that are mostly punctuation
+        if len(re.sub(r'[^\w\s]', '', name)) < len(name) * 0.5:
+            return True
+        
+        return False
+    
     def validate_relationships(self, relationships: List[Relationship], entities: List[Entity]) -> List[Relationship]:
-        """Validate relationships against known entities."""
-        entity_names = {entity.name for entity in entities}
+        """Validate relationships against known entities with quality filtering."""
+        entity_names = {entity.name.lower() for entity in entities}
         validated_relationships = []
+        seen_relationships = set()  # Track to avoid duplicates
         
         for relationship in relationships:
-            # Check if both source and target entities exist
-            if (relationship.source in entity_names and 
-                relationship.target in entity_names and
-                relationship.source != relationship.target):
-                validated_relationships.append(relationship)
+            # Check if both source and target entities exist (case-insensitive)
+            source_exists = any(entity.name.lower() == relationship.source.lower() for entity in entities)
+            target_exists = any(entity.name.lower() == relationship.target.lower() for entity in entities)
+            
+            if not (source_exists and target_exists):
+                continue
+            
+            # Skip self-relationships
+            if relationship.source.lower() == relationship.target.lower():
+                continue
+            
+            # Quality checks for relationships
+            if self._is_low_quality_relationship(relationship):
+                continue
+            
+            # Create normalized key for deduplication
+            rel_key = (relationship.source.lower(), relationship.target.lower(), relationship.relation_type.lower())
+            if rel_key in seen_relationships:
+                continue
+            
+            seen_relationships.add(rel_key)
+            validated_relationships.append(relationship)
         
         return validated_relationships
+    
+    def _is_low_quality_relationship(self, relationship: Relationship) -> bool:
+        """Check if relationship is low quality and should be filtered out."""
+        rel_type = relationship.relation_type.lower()
+        source = relationship.source.lower()
+        target = relationship.target.lower()
+        
+        # Filter out generic/meaningless relationships
+        generic_relations = [
+            'related to', 'associated with', 'connected to', 'linked to',
+            'part of', 'contains', 'includes', 'has', 'is', 'are', 'was', 'were'
+        ]
+        
+        if rel_type in generic_relations:
+            return True
+        
+        # Filter out relationships with very short entities
+        if len(source) < 2 or len(target) < 2:
+            return True
+        
+        # Filter out relationships where entities are too similar
+        if source == target or source in target or target in source:
+            return True
+        
+        # Filter out relationships with common words as entities
+        common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with'}
+        if source in common_words or target in common_words:
+            return True
+        
+        return False
     
     def _parse_claude_response(self, raw_response: str) -> Dict[str, Any]:
         """Parse Claude's response using multiple robust parsing strategies."""

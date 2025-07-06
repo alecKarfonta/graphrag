@@ -282,4 +282,32 @@ class QueryProcessor:
             "expansion": expansion,
             "reasoning_path": reasoning_path,
             "llm_analysis": llm_analysis
-        } 
+        }
+    
+    def process_query(self, query: str) -> str:
+        """Process a query and return a response (placeholder for RAG integration)."""
+        try:
+            # Get query analysis
+            analysis = self.get_query_analysis(query)
+            
+            # For now, return a simple response based on intent
+            intent = analysis["intent"].primary_intent
+            entities = [e.name for e in analysis["entities"]]
+            
+            if intent == "factual":
+                if entities:
+                    return f"Looking for factual information about {', '.join(entities)}"
+                else:
+                    return f"Searching for factual information about: {query}"
+            
+            elif intent == "analytical":
+                return f"Analyzing the query: {query}"
+            
+            elif intent == "comparative":
+                return f"Comparing entities mentioned in: {query}"
+            
+            else:
+                return f"Processing query: {query}"
+                
+        except Exception as e:
+            return f"Error processing query: {str(e)}" 
