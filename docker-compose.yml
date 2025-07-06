@@ -142,6 +142,25 @@ services:
       - graphrag-network
     restart: unless-stopped
 
+  # Reddit Crawler Service
+  reddit-crawler:
+    build:
+      context: ./reddit_crawler
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - GRAPHRAG_API_URL=http://api:8000
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
+      - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-GraphRAG-RedditCrawler/1.0}
+    volumes:
+      - reddit_crawler_logs:/app/logs
+      - reddit_crawler_cache:/app/.cache
+    networks:
+      - graphrag-network
+    restart: unless-stopped
+
 volumes:
   # API persistent storage
   api_data:
@@ -203,6 +222,12 @@ volumes:
   rel_models:
     driver: local
   rel_logs:
+    driver: local
+  
+  # Reddit Crawler persistent storage
+  reddit_crawler_logs:
+    driver: local
+  reddit_crawler_cache:
     driver: local
 
 networks:

@@ -522,27 +522,53 @@ async def ingest_documents(
         raise HTTPException(status_code=400, detail=f"Error ingesting documents: {str(e)}")
 
 @app.get("/knowledge-graph/stats")
-async def get_knowledge_graph_stats():
-    """Get knowledge graph statistics."""
+async def get_knowledge_graph_stats(domain: str | None = None):
+    """Get knowledge graph statistics, optionally filtered by domain."""
     try:
         if not knowledge_graph_builder:
             raise HTTPException(status_code=503, detail="Knowledge graph not available")
         
-        stats = knowledge_graph_builder.get_graph_stats()
+        stats = knowledge_graph_builder.get_graph_stats(domain)
         return stats
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting graph stats: {str(e)}")
 
+@app.get("/knowledge-graph/domains")
+async def get_available_domains():
+    """Get list of available domains in the knowledge graph."""
+    try:
+        if not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Knowledge graph not available")
+        
+        domains = knowledge_graph_builder.get_available_domains()
+        return {"domains": domains, "count": len(domains)}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting domains: {str(e)}")
+
+@app.get("/knowledge-graph/domain-stats")
+async def get_domain_statistics():
+    """Get statistics for each domain in the knowledge graph."""
+    try:
+        if not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Knowledge graph not available")
+        
+        domain_stats = knowledge_graph_builder.get_domain_statistics()
+        return domain_stats
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting domain statistics: {str(e)}")
+
 @app.get("/knowledge-graph/export")
-async def export_knowledge_graph(format: str = "json"):
-    """Export knowledge graph data."""
+async def export_knowledge_graph(format: str = "json", domain: str | None = None):
+    """Export knowledge graph data, optionally filtered by domain."""
     try:
         if not knowledge_graph_builder:
             raise HTTPException(status_code=503, detail="Knowledge graph not available")
         
         if format == "json":
-            graph_data = knowledge_graph_builder.export_graph_json()
+            graph_data = knowledge_graph_builder.export_graph_json(domain)
             return graph_data
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")

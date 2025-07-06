@@ -77,53 +77,59 @@ class KnowledgeGraphBuilder:
         # In-memory graph for analysis
         self.graph = nx.Graph()
         
-    def add_entities_and_relationships(self, entities: List[Dict], relationships: List[Dict]) -> None:
-        """Add entities and relationships to the knowledge graph."""
+    def add_entities_and_relationships(self, entities: List[Dict], relationships: List[Dict], domain: str = "general") -> None:
+        """Add entities and relationships to the knowledge graph with domain tracking."""
         
         # Add to Neo4j
         if self.driver:
             with self.driver.session() as session:
-                # Add entities with occurrence tracking
+                # Add entities with occurrence tracking and domain
                 for entity in entities:
                     session.run("""
                         MERGE (e:Entity {id: $id})
-                        ON CREATE SET e.name = $name, e.type = $type, e.description = $description, e.occurrence = 1
-                        ON MATCH SET e.occurrence = e.occurrence + 1
+                        ON CREATE SET e.name = $name, e.type = $type, e.description = $description, 
+                                     e.occurrence = 1, e.domain = $domain
+                        ON MATCH SET e.occurrence = e.occurrence + 1, e.domain = $domain
                         """, 
                         id=entity["name"],
                         name=entity["name"],
                         type=entity["type"],
-                        description=entity.get("description", "")
+                        description=entity.get("description", ""),
+                        domain=domain
                     )
                 
-                # Add relationships with occurrence tracking
+                # Add relationships with occurrence tracking and domain
                 for rel in relationships:
                     session.run("""
                         MATCH (source:Entity {id: $source})
                         MATCH (target:Entity {id: $target})
                         MERGE (source)-[r:RELATES_TO {type: $type}]->(target)
-                        ON CREATE SET r.context = $context, r.weight = 1
-                        ON MATCH SET r.weight = r.weight + 1
+                        ON CREATE SET r.context = $context, r.weight = 1, r.domain = $domain
+                        ON MATCH SET r.weight = r.weight + 1, r.domain = $domain
                         """,
                         source=rel["source"],
                         target=rel["target"],
                         type=rel["relation"],
-                        context=rel.get("context", "")
+                        context=rel.get("context", ""),
+                        domain=domain
                     )
         
-        # Add to NetworkX for analysis with occurrence tracking
+        # Add to NetworkX for analysis with occurrence tracking and domain
         for entity in entities:
             entity_name = entity["name"]
             if entity_name in self.graph:
                 # Increment occurrence count
                 current_occurrence = self.graph.nodes[entity_name].get("occurrence", 1)
                 self.graph.nodes[entity_name]["occurrence"] = current_occurrence + 1
+                # Update domain
+                self.graph.nodes[entity_name]["domain"] = domain
             else:
-                # Add new node with occurrence count
+                # Add new node with occurrence count and domain
                 self.graph.add_node(entity_name, 
                                   type=entity["type"],
                                   description=entity.get("description", ""),
-                                  occurrence=1)
+                                  occurrence=1,
+                                  domain=domain)
         
         for rel in relationships:
             source = rel["source"]
@@ -134,12 +140,15 @@ class KnowledgeGraphBuilder:
                 # Increment weight for existing edge
                 current_weight = self.graph.edges[source, target].get("weight", 1)
                 self.graph.edges[source, target]["weight"] = current_weight + 1
+                # Update domain
+                self.graph.edges[source, target]["domain"] = domain
             else:
-                # Add new edge with weight
+                # Add new edge with weight and domain
                 self.graph.add_edge(source, target,
                                   type=rel_type,
                                   context=rel.get("context", ""),
-                                  weight=1)
+                                  weight=1,
+                                  domain=domain)
     
     def detect_communities(self, algorithm: str = "leiden") -> List[Community]:
         """Detect communities in the knowledge graph."""
@@ -352,19 +361,42 @@ class KnowledgeGraphBuilder:
         
         return enriched_properties
     
-    def get_graph_statistics(self) -> Dict[str, Any]:
-        """Get statistics about the knowledge graph."""
+    def get_graph_statistics(self, domain: str | None = None) -> Dict[str, Any]:
+        """Get statistics about the knowledge graph, optionally filtered by domain."""
         if len(self.graph.nodes()) == 0:
-            return {"nodes": 0, "edges": 0, "communities": 0}
+            return {"nodes": 0, "edges": 0, "communities": 0, "domain": domain}
         
-        return {
-            "nodes": self.graph.number_of_nodes(),
-            "edges": self.graph.number_of_edges(),
-            "density": nx.density(self.graph),
-            "average_clustering": nx.average_clustering(self.graph),
-            "connected_components": nx.number_connected_components(self.graph),
-            "average_shortest_path": nx.average_shortest_path_length(self.graph) if nx.is_connected(self.graph) else None
-        }
+        # Filter by domain if specified
+        if domain:
+            filtered_nodes = [n for n, data in self.graph.nodes(data=True) 
+                            if data.get("domain") == domain]
+            filtered_edges = [(u, v) for u, v, data in self.graph.edges(data=True) 
+                             if data.get("domain") == domain]
+            
+            # Create subgraph for statistics
+            subgraph = self.graph.subgraph(filtered_nodes)
+            
+            return {
+                "nodes": subgraph.number_of_nodes(),
+                "edges": subgraph.number_of_edges(),
+                "density": nx.density(subgraph) if subgraph.number_of_nodes() > 1 else 0,
+                "average_clustering": nx.average_clustering(subgraph) if subgraph.number_of_nodes() > 2 else 0,
+                "connected_components": nx.number_connected_components(subgraph),
+                "average_shortest_path": nx.average_shortest_path_length(subgraph) if nx.is_connected(subgraph) else None,
+                "domain": domain,
+                "filtered": True
+            }
+        else:
+            return {
+                "nodes": self.graph.number_of_nodes(),
+                "edges": self.graph.number_of_edges(),
+                "density": nx.density(self.graph),
+                "average_clustering": nx.average_clustering(self.graph),
+                "connected_components": nx.number_connected_components(self.graph),
+                "average_shortest_path": nx.average_shortest_path_length(self.graph) if nx.is_connected(self.graph) else None,
+                "domain": "all",
+                "filtered": False
+            }
     
     def export_graph(self, format: str = "json") -> str:
         """Export the knowledge graph in various formats."""
@@ -379,16 +411,66 @@ class KnowledgeGraphBuilder:
         else:
             raise ValueError(f"Unsupported format: {format}")
     
-    def export_graph_json(self) -> Dict[str, Any]:
-        """Export the knowledge graph as JSON dictionary."""
-        return {
-            "nodes": [{"id": node, "label": node, "type": data.get("type", "UNKNOWN"), "occurrence": data.get("occurrence", 1), **data} for node, data in self.graph.nodes(data=True)],
-            "edges": [{"source": u, "target": v, "type": data.get("type", "RELATES_TO"), "weight": data.get("weight", 1), **data} for u, v, data in self.graph.edges(data=True)]
-        }
+    def export_graph_json(self, domain: str | None = None) -> Dict[str, Any]:
+        """Export the knowledge graph as JSON dictionary, optionally filtered by domain."""
+        if domain:
+            # Filter nodes and edges by domain
+            filtered_nodes = [(node, data) for node, data in self.graph.nodes(data=True) 
+                             if data.get("domain") == domain]
+            filtered_edges = [(u, v, data) for u, v, data in self.graph.edges(data=True) 
+                             if data.get("domain") == domain]
+            
+            return {
+                "nodes": [{"id": node, "label": node, "type": data.get("type", "UNKNOWN"), 
+                          "occurrence": data.get("occurrence", 1), "domain": data.get("domain", domain), **data} 
+                         for node, data in filtered_nodes],
+                "edges": [{"source": u, "target": v, "type": data.get("type", "RELATES_TO"), 
+                          "weight": data.get("weight", 1), "domain": data.get("domain", domain), **data} 
+                         for u, v, data in filtered_edges],
+                "domain": domain,
+                "filtered": True
+            }
+        else:
+            return {
+                "nodes": [{"id": node, "label": node, "type": data.get("type", "UNKNOWN"), 
+                          "occurrence": data.get("occurrence", 1), "domain": data.get("domain", "general"), **data} 
+                         for node, data in self.graph.nodes(data=True)],
+                "edges": [{"source": u, "target": v, "type": data.get("type", "RELATES_TO"), 
+                          "weight": data.get("weight", 1), "domain": data.get("domain", "general"), **data} 
+                         for u, v, data in self.graph.edges(data=True)],
+                "domain": "all",
+                "filtered": False
+            }
     
-    def get_graph_stats(self) -> Dict[str, Any]:
+    def get_graph_stats(self, domain: str | None = None) -> Dict[str, Any]:
         """Get knowledge graph statistics."""
-        return self.get_graph_statistics()
+        return self.get_graph_statistics(domain)
+    
+    def get_available_domains(self) -> List[str]:
+        """Get list of available domains in the knowledge graph."""
+        domains = set()
+        
+        # Get domains from nodes
+        for node, data in self.graph.nodes(data=True):
+            if "domain" in data:
+                domains.add(data["domain"])
+        
+        # Get domains from edges
+        for u, v, data in self.graph.edges(data=True):
+            if "domain" in data:
+                domains.add(data["domain"])
+        
+        return sorted(list(domains))
+    
+    def get_domain_statistics(self) -> Dict[str, Dict[str, Any]]:
+        """Get statistics for each domain in the knowledge graph."""
+        domain_stats = {}
+        available_domains = self.get_available_domains()
+        
+        for domain in available_domains:
+            domain_stats[domain] = self.get_graph_statistics(domain)
+        
+        return domain_stats
     
     def build_graph(self, entities, relationships, domain: str = "general"):
         """Build the knowledge graph from entities and relationships."""
@@ -411,7 +493,7 @@ class KnowledgeGraphBuilder:
                 "context": rel.context or ""
             })
         
-        self.add_entities_and_relationships(entity_dicts, relationship_dicts)
+        self.add_entities_and_relationships(entity_dicts, relationship_dicts, domain)
     
     def clear_graph(self):
         """Clear the knowledge graph."""
