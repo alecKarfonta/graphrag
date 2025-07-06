@@ -6,6 +6,7 @@ from docx import Document as DocxDocument
 from bs4 import BeautifulSoup
 import csv
 import json
+import markdown
 
 @dataclass
 class DocumentChunk:
@@ -37,6 +38,7 @@ class DocumentProcessor:
             '.pdf': self.process_pdf,
             '.docx': self.process_docx,
             '.txt': self.process_text,
+            '.md': self.process_markdown,
             '.html': self.process_html,
             '.csv': self.process_csv,
             '.json': self.process_json
@@ -161,6 +163,83 @@ class DocumentProcessor:
                 text=chunk_text,
                 chunk_id=f"{os.path.basename(file_path)}_c{chunk_idx}",
                 source_file=file_path,
+                chunk_index=chunk_idx,
+                metadata=metadata.__dict__
+            )
+            chunks.append(chunk)
+        
+        return chunks
+    
+    def process_markdown(self, file_path: str, metadata: DocumentMetadata) -> List[DocumentChunk]:
+        """Process markdown files with section-aware chunking."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            md_text = f.read()
+        
+        # Parse markdown to extract structure
+        md = markdown.Markdown(extensions=['toc', 'tables', 'fenced_code'])
+        html_content = md.convert(md_text)
+        
+        # Use BeautifulSoup to extract text while preserving structure
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        chunks = []
+        current_section = ""
+        chunk_text = ""
+        chunk_idx = 0
+        
+        # Process each element to maintain section structure
+        for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'code', 'pre']):
+            text = element.get_text(strip=True)
+            if not text:
+                continue
+            
+            # Check if this is a header
+            if element.name.startswith('h'):
+                # Start new section
+                current_section = text
+                # Add header to new chunk
+                if chunk_text:
+                    chunk = DocumentChunk(
+                        text=chunk_text,
+                        chunk_id=f"{os.path.basename(file_path)}_c{chunk_idx}",
+                        source_file=file_path,
+                        section_header=current_section,
+                        chunk_index=chunk_idx,
+                        metadata=metadata.__dict__
+                    )
+                    chunks.append(chunk)
+                    chunk_text = ""
+                    chunk_idx += 1
+                
+                chunk_text = f"# {text}\n"
+            else:
+                # Add content to current chunk
+                if chunk_text:
+                    chunk_text += "\n" + text
+                else:
+                    chunk_text = text
+                
+                # Create new chunk if text is getting long
+                if len(chunk_text) > 1000:
+                    chunk = DocumentChunk(
+                        text=chunk_text,
+                        chunk_id=f"{os.path.basename(file_path)}_c{chunk_idx}",
+                        source_file=file_path,
+                        section_header=current_section,
+                        chunk_index=chunk_idx,
+                        metadata=metadata.__dict__
+                    )
+                    chunks.append(chunk)
+                    chunk_text = ""
+                    chunk_idx += 1
+        
+        # Add remaining text as final chunk
+        if chunk_text:
+            chunk = DocumentChunk(
+                text=chunk_text,
+                chunk_id=f"{os.path.basename(file_path)}_c{chunk_idx}",
+                source_file=file_path,
+                section_header=current_section,
                 chunk_index=chunk_idx,
                 metadata=metadata.__dict__
             )
