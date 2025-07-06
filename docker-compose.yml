@@ -25,6 +25,11 @@ services:
     volumes:
       - ./backend:/app
       - api_data:/app/data
+      - api_logs:/app/logs
+      - api_cache:/app/.cache
+      - api_models:/app/models
+      - api_documents:/app/documents
+      - api_exports:/app/exports
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -40,6 +45,9 @@ services:
       - REACT_APP_API_URL=http://localhost:8000
     depends_on:
       - api
+    volumes:
+      - frontend_data:/app/data
+      - frontend_logs:/app/logs
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -55,11 +63,15 @@ services:
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2g
+      - NEO4J_dbms_memory_pagecache_size=1g
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
       - neo4j_import:/var/lib/neo4j/import
       - neo4j_plugins:/plugins
+      - neo4j_backup:/backup
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -70,19 +82,26 @@ services:
     ports:
       - "6333:6333"
       - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
     volumes:
       - qdrant_data:/qdrant/storage
+      - qdrant_logs:/qdrant/logs
+      - qdrant_snapshots:/qdrant/snapshots
     networks:
       - graphrag-network
     restart: unless-stopped
 
-  # Redis for caching (optional)
+  # Redis for caching
   redis:
     image: redis:7-alpine
     ports:
       - "16379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
+      - redis_logs:/var/log/redis
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -99,6 +118,8 @@ services:
       - TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
     volumes:
       - ner_cache:/app/.cache
+      - ner_models:/app/models
+      - ner_logs:/app/logs
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -115,20 +136,74 @@ services:
       - TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
     volumes:
       - rel_cache:/app/.cache
+      - rel_models:/app/models
+      - rel_logs:/app/logs
     networks:
       - graphrag-network
     restart: unless-stopped
 
 volumes:
+  # API persistent storage
   api_data:
+    driver: local
+  api_logs:
+    driver: local
+  api_cache:
+    driver: local
+  api_models:
+    driver: local
+  api_documents:
+    driver: local
+  api_exports:
+    driver: local
+  
+  # Frontend persistent storage
+  frontend_data:
+    driver: local
+  frontend_logs:
+    driver: local
+  
+  # Neo4j persistent storage
   neo4j_data:
+    driver: local
   neo4j_logs:
+    driver: local
   neo4j_import:
+    driver: local
   neo4j_plugins:
+    driver: local
+  neo4j_backup:
+    driver: local
+  
+  # Qdrant persistent storage
   qdrant_data:
+    driver: local
+  qdrant_logs:
+    driver: local
+  qdrant_snapshots:
+    driver: local
+  
+  # Redis persistent storage
   redis_data:
+    driver: local
+  redis_logs:
+    driver: local
+  
+  # NER API persistent storage
   ner_cache:
+    driver: local
+  ner_models:
+    driver: local
+  ner_logs:
+    driver: local
+  
+  # Relationship API persistent storage
   rel_cache:
+    driver: local
+  rel_models:
+    driver: local
+  rel_logs:
+    driver: local
 
 networks:
   graphrag-network:

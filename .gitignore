@@ -106,4 +106,7 @@ dmypy.json
 
 # API keys and secrets
 secrets.json
-credentials.json 
+credentials.json
+
+# GraphRAG persistent storage backups
+backups/ 
