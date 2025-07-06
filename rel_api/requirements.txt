@@ -9,7 +9,8 @@ gliner>=0.1.0
 torch>=2.0.0
 transformers>=4.29.2
 huggingface_hub>=0.16.0
+utca>=0.1.0
 
 # Utilities
-requests==2.31.0
+requests>=2.32.2
 numpy>=1.26.0 

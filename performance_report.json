@@ -1,0 +1,87 @@
+{
+  "summary": {
+    "total_requests": 33,
+    "total_successes": 33,
+    "overall_success_rate": 100.0,
+    "avg_response_time": 1.993023597832882,
+    "fastest_endpoint": "query_complexity",
+    "slowest_endpoint": "enhanced_query"
+  },
+  "endpoint_details": {
+    "enhanced_query": {
+      "total_requests": 6,
+      "successful_requests": 6,
+      "success_rate": 100.0,
+      "avg_response_time": 8.800233364105225,
+      "min_response_time": 7.33105993270874,
+      "max_response_time": 10.269484758377075,
+      "median_response_time": 8.814281582832336
+    },
+    "advanced_reasoning": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 0.31383275985717773,
+      "min_response_time": 0.30913639068603516,
+      "max_response_time": 0.316910982131958,
+      "median_response_time": 0.31545090675354004
+    },
+    "causal_reasoning": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 0.29229577382405597,
+      "min_response_time": 0.27429652214050293,
+      "max_response_time": 0.31613659858703613,
+      "median_response_time": 0.2864542007446289
+    },
+    "comparative_reasoning": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 0.3035291830698649,
+      "min_response_time": 0.29663825035095215,
+      "max_response_time": 0.3075542449951172,
+      "median_response_time": 0.3063950538635254
+    },
+    "multi_hop_reasoning": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 0.2828158537546794,
+      "min_response_time": 0.2680680751800537,
+      "max_response_time": 0.29489731788635254,
+      "median_response_time": 0.28548216819763184
+    },
+    "query_complexity": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 0.0017586549123128254,
+      "min_response_time": 0.00153350830078125,
+      "max_response_time": 0.0019288063049316406,
+      "median_response_time": 0.001813650131225586
+    },
+    "query_intent": {
+      "total_requests": 3,
+      "successful_requests": 3,
+      "success_rate": 100.0,
+      "avg_response_time": 2.0385194619496665,
+      "min_response_time": 1.9656214714050293,
+      "max_response_time": 2.088179349899292,
+      "median_response_time": 2.0617575645446777
+    },
+    "entity_extraction": {
+      "total_requests": 9,
+      "successful_requests": 9,
+      "success_rate": 100.0,
+      "avg_response_time": 0.36334705352783203,
+      "min_response_time": 0.2666168212890625,
+      "max_response_time": 0.4961981773376465,
+      "median_response_time": 0.3166482448577881
+    }
+  },
+  "recommendations": [
+    "\ud83d\udc0c enhanced_query: Slow response time (8.80s)"
+  ]
+}

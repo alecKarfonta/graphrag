@@ -11,6 +11,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import spacy
 from entity_extractor import Entity
+import requests
+import logging
+import json
+import time
+from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class EntityLink:
@@ -22,8 +29,20 @@ class EntityLink:
     confidence: float
     metadata: Dict[str, Any]
 
+@dataclass
+class LinkedEntity:
+    """Represents an entity linked to a knowledge base."""
+    entity_text: str
+    entity_type: str
+    confidence: float
+    knowledge_base_id: str
+    knowledge_base_url: str
+    description: Optional[str] = None
+    aliases: List[str] = None
+    properties: Dict[str, Any] = None
+
 class EntityLinker:
-    """Links similar entities across documents and handles disambiguation."""
+    """Entity linker for knowledge base integration."""
     
     def __init__(self):
         """Initialize the entity linker."""
@@ -49,6 +68,13 @@ class EntityLinker:
         )
         self.entity_vectors = {}
         self.vectorizer_fitted = False
+        
+        self.wikidata_base_url = "https://www.wikidata.org/w/api.php"
+        self.dbpedia_base_url = "https://dbpedia.org/sparql"
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'GraphRAG-EntityLinker/1.0'
+        })
     
     def link_entities(self, entities: List[Entity], existing_entities: List[Entity] = None) -> List[EntityLink]:
         """Link new entities with existing ones and create clusters."""
@@ -287,4 +313,394 @@ class EntityLinker:
             "total_clusters": total_clusters,
             "average_cluster_size": total_entities / total_clusters if total_clusters > 0 else 0,
             "largest_cluster_size": max(len(entities) for entities in self.entity_clusters.values()) if self.entity_clusters else 0
-        } 
+        }
+    
+    def link_entities_to_knowledge_bases(self, entities: List[Dict[str, Any]], text: str = None) -> List[LinkedEntity]:
+        """
+        Link entities to knowledge bases.
+        
+        Args:
+            entities: List of extracted entities
+            text: Original text for context
+            
+        Returns:
+            List of linked entities
+        """
+        linked_entities = []
+        
+        for entity in entities:
+            entity_text = entity.get('name', entity.get('text', ''))
+            entity_type = entity.get('entity_type', '')
+            confidence = entity.get('confidence', 0.5)
+            
+            if not entity_text:
+                continue
+            
+            # Try to link to Wikidata first
+            wikidata_link = self._link_to_wikidata(entity_text, entity_type)
+            
+            if wikidata_link:
+                linked_entity = LinkedEntity(
+                    entity_text=entity_text,
+                    entity_type=entity_type,
+                    confidence=confidence,
+                    knowledge_base_id=wikidata_link['id'],
+                    knowledge_base_url=wikidata_link['url'],
+                    description=wikidata_link.get('description'),
+                    aliases=wikidata_link.get('aliases', []),
+                    properties=wikidata_link.get('properties', {})
+                )
+                linked_entities.append(linked_entity)
+            else:
+                # Try DBpedia as fallback
+                dbpedia_link = self._link_to_dbpedia(entity_text, entity_type)
+                
+                if dbpedia_link:
+                    linked_entity = LinkedEntity(
+                        entity_text=entity_text,
+                        entity_type=entity_type,
+                        confidence=confidence,
+                        knowledge_base_id=dbpedia_link['id'],
+                        knowledge_base_url=dbpedia_link['url'],
+                        description=dbpedia_link.get('description'),
+                        aliases=dbpedia_link.get('aliases', []),
+                        properties=dbpedia_link.get('properties', {})
+                    )
+                    linked_entities.append(linked_entity)
+        
+        logger.info(f"Linked {len(linked_entities)} entities to knowledge bases")
+        return linked_entities
+    
+    def _link_to_wikidata(self, entity_text: str, entity_type: str) -> Optional[Dict[str, Any]]:
+        """Link entity to Wikidata."""
+        try:
+            # Search for entity in Wikidata
+            search_params = {
+                'action': 'wbsearchentities',
+                'search': entity_text,
+                'language': 'en',
+                'format': 'json',
+                'limit': 5
+            }
+            
+            response = self.session.get(self.wikidata_base_url, params=search_params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'search' in data and data['search']:
+                # Find the best match
+                best_match = self._find_best_wikidata_match(data['search'], entity_text, entity_type)
+                
+                if best_match:
+                    # Get detailed information
+                    entity_info = self._get_wikidata_entity_info(best_match['id'])
+                    
+                    if entity_info:
+                        return {
+                            'id': best_match['id'],
+                            'url': f"https://www.wikidata.org/wiki/{best_match['id']}",
+                            'description': entity_info.get('description'),
+                            'aliases': entity_info.get('aliases', []),
+                            'properties': entity_info.get('claims', {})
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error linking to Wikidata: {e}")
+            return None
+    
+    def _find_best_wikidata_match(self, search_results: List[Dict], entity_text: str, entity_type: str) -> Optional[Dict]:
+        """Find the best Wikidata match for an entity."""
+        if not search_results:
+            return None
+        
+        # Score each result
+        scored_results = []
+        for result in search_results:
+            score = 0
+            
+            # Exact match gets high score
+            if result['label'].lower() == entity_text.lower():
+                score += 10
+            elif entity_text.lower() in result['label'].lower():
+                score += 5
+            
+            # Check aliases
+            if 'aliases' in result:
+                for alias in result['aliases']:
+                    if alias.lower() == entity_text.lower():
+                        score += 8
+                    elif entity_text.lower() in alias.lower():
+                        score += 3
+            
+            # Check description relevance
+            if 'description' in result:
+                desc_lower = result['description'].lower()
+                entity_lower = entity_type.lower()
+                if entity_lower in desc_lower:
+                    score += 2
+            
+            scored_results.append((result, score))
+        
+        # Return the highest scoring result
+        if scored_results:
+            best_result = max(scored_results, key=lambda x: x[1])
+            if best_result[1] > 0:  # Only return if we have some confidence
+                return best_result[0]
+        
+        return None
+    
+    def _get_wikidata_entity_info(self, entity_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a Wikidata entity."""
+        try:
+            params = {
+                'action': 'wbgetentities',
+                'ids': entity_id,
+                'languages': 'en',
+                'format': 'json',
+                'props': 'labels|descriptions|aliases|claims'
+            }
+            
+            response = self.session.get(self.wikidata_base_url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'entities' in data and entity_id in data['entities']:
+                entity = data['entities'][entity_id]
+                
+                return {
+                    'description': entity.get('descriptions', {}).get('en', {}).get('value'),
+                    'aliases': [alias['value'] for alias in entity.get('aliases', {}).get('en', [])],
+                    'claims': entity.get('claims', {})
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting Wikidata entity info: {e}")
+            return None
+    
+    def _link_to_dbpedia(self, entity_text: str, entity_type: str) -> Optional[Dict[str, Any]]:
+        """Link entity to DBpedia."""
+        try:
+            # Search for entity in DBpedia
+            search_query = f"""
+            SELECT ?entity ?label ?abstract ?type
+            WHERE {{
+                ?entity rdfs:label ?label .
+                FILTER(LANG(?label) = "en")
+                FILTER(CONTAINS(LCASE(?label), "{entity_text.lower()}"))
+                OPTIONAL {{ ?entity rdfs:type ?type }}
+                OPTIONAL {{ ?entity dbo:abstract ?abstract }}
+                FILTER(LANG(?abstract) = "en")
+            }}
+            LIMIT 5
+            """
+            
+            params = {
+                'query': search_query,
+                'format': 'json'
+            }
+            
+            response = self.session.get(self.dbpedia_base_url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'results' in data and 'bindings' in data['results']:
+                bindings = data['results']['bindings']
+                
+                if bindings:
+                    # Find the best match
+                    best_match = self._find_best_dbpedia_match(bindings, entity_text, entity_type)
+                    
+                    if best_match:
+                        return {
+                            'id': best_match['entity']['value'],
+                            'url': best_match['entity']['value'],
+                            'description': best_match.get('abstract', {}).get('value'),
+                            'aliases': [best_match['label']['value']],
+                            'properties': {'type': best_match.get('type', {}).get('value')}
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error linking to DBpedia: {e}")
+            return None
+    
+    def _find_best_dbpedia_match(self, bindings: List[Dict], entity_text: str, entity_type: str) -> Optional[Dict]:
+        """Find the best DBpedia match for an entity."""
+        if not bindings:
+            return None
+        
+        # Score each result
+        scored_results = []
+        for binding in bindings:
+            score = 0
+            label = binding.get('label', {}).get('value', '')
+            
+            # Exact match gets high score
+            if label.lower() == entity_text.lower():
+                score += 10
+            elif entity_text.lower() in label.lower():
+                score += 5
+            
+            # Check type relevance
+            entity_type_lower = entity_type.lower()
+            if 'type' in binding:
+                type_value = binding['type']['value'].lower()
+                if entity_type_lower in type_value:
+                    score += 3
+            
+            scored_results.append((binding, score))
+        
+        # Return the highest scoring result
+        if scored_results:
+            best_result = max(scored_results, key=lambda x: x[1])
+            if best_result[1] > 0:  # Only return if we have some confidence
+                return best_result[0]
+        
+        return None
+    
+    def disambiguate_entities(self, entities: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+        """
+        Disambiguate entities using knowledge base information.
+        
+        Args:
+            entities: List of extracted entities
+            text: Original text for context
+            
+        Returns:
+            List of disambiguated entities
+        """
+        disambiguated_entities = []
+        
+        for entity in entities:
+            entity_text = entity.get('name', entity.get('text', ''))
+            
+            if not entity_text:
+                continue
+            
+            # Try to link the entity
+            linked_entity = self._link_to_wikidata(entity_text, entity.get('entity_type', ''))
+            
+            if linked_entity:
+                # Use knowledge base information to improve entity
+                improved_entity = entity.copy()
+                improved_entity['knowledge_base_id'] = linked_entity['id']
+                improved_entity['knowledge_base_url'] = linked_entity['url']
+                improved_entity['description'] = linked_entity.get('description')
+                improved_entity['aliases'] = linked_entity.get('aliases', [])
+                
+                # Improve entity type if available
+                if linked_entity.get('properties'):
+                    # Extract type information from properties
+                    entity_type = self._extract_entity_type_from_properties(linked_entity['properties'])
+                    if entity_type:
+                        improved_entity['entity_type'] = entity_type
+                
+                disambiguated_entities.append(improved_entity)
+            else:
+                disambiguated_entities.append(entity)
+        
+        return disambiguated_entities
+    
+    def _extract_entity_type_from_properties(self, properties: Dict[str, Any]) -> Optional[str]:
+        """Extract entity type from Wikidata properties."""
+        # Common Wikidata property mappings
+        type_properties = {
+            'P31': 'instance_of',  # instance of
+            'P106': 'occupation',   # occupation
+            'P27': 'country',       # country of citizenship
+            'P17': 'country',       # country
+            'P159': 'location',     # headquarters location
+        }
+        
+        for prop_id, prop_type in type_properties.items():
+            if prop_id in properties:
+                # Extract the type from the property value
+                # This is a simplified implementation
+                return prop_type
+        
+        return None
+    
+    def enrich_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Enrich entities with additional information from knowledge bases.
+        
+        Args:
+            entities: List of entities to enrich
+            
+        Returns:
+            List of enriched entities
+        """
+        enriched_entities = []
+        
+        for entity in entities:
+            entity_text = entity.get('name', entity.get('text', ''))
+            
+            if not entity_text:
+                enriched_entities.append(entity)
+                continue
+            
+            # Try to get additional information
+            wikidata_info = self._link_to_wikidata(entity_text, entity.get('entity_type', ''))
+            
+            if wikidata_info:
+                enriched_entity = entity.copy()
+                enriched_entity['enriched'] = True
+                enriched_entity['knowledge_base_info'] = wikidata_info
+                
+                # Add additional properties
+                if wikidata_info.get('properties'):
+                    enriched_entity['additional_properties'] = self._extract_additional_properties(
+                        wikidata_info['properties']
+                    )
+                
+                enriched_entities.append(enriched_entity)
+            else:
+                enriched_entities.append(entity)
+        
+        return enriched_entities
+    
+    def _extract_additional_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract additional properties from Wikidata claims."""
+        additional_props = {}
+        
+        # Common properties to extract
+        property_mappings = {
+            'P569': 'birth_date',
+            'P570': 'death_date',
+            'P19': 'birth_place',
+            'P20': 'death_place',
+            'P166': 'awards',
+            'P69': 'educated_at',
+            'P937': 'work_location',
+        }
+        
+        for prop_id, prop_name in property_mappings.items():
+            if prop_id in properties:
+                # Extract the property value
+                # This is a simplified implementation
+                additional_props[prop_name] = f"Property {prop_id}"
+        
+        return additional_props
+    
+    def is_available(self) -> bool:
+        """Check if the entity linker is available."""
+        try:
+            # Test connectivity to Wikidata
+            response = self.session.get(self.wikidata_base_url, params={'action': 'help'}, timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+
+def get_entity_linker() -> EntityLinker:
+    """Get a singleton instance of the entity linker."""
+    if not hasattr(get_entity_linker, '_instance'):
+        get_entity_linker._instance = EntityLinker()
+    return get_entity_linker._instance 

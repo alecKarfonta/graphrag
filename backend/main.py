@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import tempfile
 import shutil
 import json
+import logging
 from document_processor import DocumentProcessor, DocumentChunk
 from enhanced_document_processor import EnhancedDocumentProcessor
 from hybrid_retriever import HybridRetriever
@@ -21,6 +22,10 @@ from rel_extractor import get_relationship_extractor
 from enhanced_query_processor import EnhancedQueryProcessor
 from entity_linker import EntityLinker
 from graph_reasoner import GraphReasoner
+from advanced_reasoning_engine import AdvancedReasoningEngine
+from enhanced_entity_extractor import EnhancedEntityExtractor, get_enhanced_entity_extractor
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Graph RAG System", version="1.0.0")
 
@@ -59,7 +64,8 @@ except Exception as e:
     evaluator = None
     test_suite = None
 
-# Initialize enhanced query processor
+# Initialize advanced reasoning components
+advanced_reasoning_engine = AdvancedReasoningEngine()
 enhanced_query_processor = EnhancedQueryProcessor()
 entity_linker = EntityLinker()
 graph_reasoner = GraphReasoner()
@@ -1344,6 +1350,341 @@ async def get_query_statistics():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting query statistics: {str(e)}")
+
+@app.post("/api/analyze-query-intent")
+async def analyze_query_intent(query: str):
+    """Analyze the intent of a user query."""
+    try:
+        intent = enhanced_query_processor.analyze_query_intent(query)
+        return {
+            "intent_type": intent.intent_type,
+            "confidence": intent.confidence,
+            "entities": intent.entities,
+            "reasoning_required": intent.reasoning_required,
+            "search_strategy": intent.search_strategy,
+            "complexity_level": intent.complexity_level,
+            "follow_up_questions": intent.follow_up_questions
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing query intent: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/advanced-reasoning")
+async def advanced_reasoning(query: str):
+    """Perform advanced reasoning on a query."""
+    try:
+        # Extract entities from query
+        extraction_result = entity_extractor.extract_entities_and_relations(query)
+        entities = [entity.name for entity in extraction_result.entities]
+        
+        # Execute reasoning
+        reasoning_paths = advanced_reasoning_engine.execute_reasoning(query, entities)
+        
+        # Generate explanation
+        explanation = advanced_reasoning_engine.generate_reasoning_explanation(reasoning_paths)
+        
+        return {
+            "query": query,
+            "entities": entities,
+            "reasoning_paths": [
+                {
+                    "path_type": path.path_type,
+                    "entities": path.entities,
+                    "relationships": path.relationships,
+                    "confidence": path.confidence,
+                    "evidence": path.evidence,
+                    "reasoning_chain": path.reasoning_chain
+                }
+                for path in reasoning_paths
+            ],
+            "explanation": explanation,
+            "total_paths": len(reasoning_paths)
+        }
+    except Exception as e:
+        logger.error(f"Error in advanced reasoning: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/enhanced-query")
+async def enhanced_query(query: str, context: Optional[Dict] = None):
+    """Process a query with enhanced capabilities including reasoning and intent analysis."""
+    try:
+        result = enhanced_query_processor.process_enhanced_query(query, context)
+        
+        return {
+            "query": query,
+            "answer": result.answer,
+            "sources": result.sources,
+            "reasoning_paths": [
+                {
+                    "path_type": path.path_type,
+                    "entities": path.entities,
+                    "relationships": path.relationships,
+                    "confidence": path.confidence,
+                    "evidence": path.evidence,
+                    "reasoning_chain": path.reasoning_chain
+                }
+                for path in result.reasoning_paths
+            ],
+            "confidence": result.confidence,
+            "search_strategy": {
+                "components": result.search_strategy.components,
+                "confidence": result.search_strategy.confidence,
+                "explanation": result.search_strategy.explanation
+            },
+            "follow_up_suggestions": result.follow_up_suggestions,
+            "explanation": result.explanation
+        }
+    except Exception as e:
+        logger.error(f"Error in enhanced query processing: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/query-complexity-analysis")
+async def analyze_query_complexity(query: str):
+    """Analyze the complexity of a query and determine reasoning requirements."""
+    try:
+        complexity = advanced_reasoning_engine.analyze_query_complexity(query)
+        
+        return {
+            "query": query,
+            "primary_reasoning": complexity['primary_reasoning'],
+            "detected_patterns": complexity['detected_patterns'],
+            "complexity_level": complexity['complexity_level'],
+            "requires_multi_hop": complexity['requires_multi_hop']
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing query complexity: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/causal-reasoning")
+async def causal_reasoning(query: str):
+    """Perform causal reasoning to find cause-effect relationships."""
+    try:
+        # Extract entities from query
+        extraction_result = entity_extractor.extract_entities_and_relations(query)
+        entities = [entity.name for entity in extraction_result.entities]
+        
+        # Execute causal reasoning
+        reasoning_paths = advanced_reasoning_engine.causal_reasoning(query, entities)
+        
+        return {
+            "query": query,
+            "entities": entities,
+            "causal_chains": [
+                {
+                    "path_type": path.path_type,
+                    "entities": path.entities,
+                    "relationships": path.relationships,
+                    "confidence": path.confidence,
+                    "evidence": path.evidence,
+                    "reasoning_chain": path.reasoning_chain
+                }
+                for path in reasoning_paths
+            ],
+            "total_chains": len(reasoning_paths)
+        }
+    except Exception as e:
+        logger.error(f"Error in causal reasoning: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/comparative-reasoning")
+async def comparative_reasoning(query: str):
+    """Perform comparative reasoning between entities."""
+    try:
+        # Extract entities from query
+        extraction_result = entity_extractor.extract_entities_and_relations(query)
+        entities = [entity.name for entity in extraction_result.entities]
+        
+        # Execute comparative reasoning
+        reasoning_paths = advanced_reasoning_engine.comparative_reasoning(query, entities)
+        
+        return {
+            "query": query,
+            "entities": entities,
+            "comparisons": [
+                {
+                    "path_type": path.path_type,
+                    "entities": path.entities,
+                    "relationships": path.relationships,
+                    "confidence": path.confidence,
+                    "evidence": path.evidence,
+                    "reasoning_chain": path.reasoning_chain
+                }
+                for path in reasoning_paths
+            ],
+            "total_comparisons": len(reasoning_paths)
+        }
+    except Exception as e:
+        logger.error(f"Error in comparative reasoning: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/multi-hop-reasoning")
+async def multi_hop_reasoning(query: str, max_hops: int = 3):
+    """Perform multi-hop reasoning across the knowledge graph."""
+    try:
+        # Extract entities from query
+        extraction_result = entity_extractor.extract_entities_and_relations(query)
+        entities = [entity.name for entity in extraction_result.entities]
+        
+        # Execute multi-hop reasoning
+        reasoning_paths = advanced_reasoning_engine.multi_hop_reasoning(query, entities)
+        
+        return {
+            "query": query,
+            "entities": entities,
+            "max_hops": max_hops,
+            "reasoning_paths": [
+                {
+                    "path_type": path.path_type,
+                    "entities": path.entities,
+                    "relationships": path.relationships,
+                    "confidence": path.confidence,
+                    "evidence": path.evidence,
+                    "reasoning_chain": path.reasoning_chain
+                }
+                for path in reasoning_paths
+            ],
+            "total_paths": len(reasoning_paths)
+        }
+    except Exception as e:
+        logger.error(f"Error in multi-hop reasoning: {e}")
+        return {"error": str(e)}
+
+@app.post("/extract-entities-relations-enhanced")
+async def extract_entities_relations_enhanced(
+    text: str = Form(...),
+    domain: str = Form("general"),
+    use_spanbert: bool = Form(True),
+    use_dependency: bool = Form(True),
+    use_entity_linking: bool = Form(True)
+):
+    """
+    Enhanced entity and relationship extraction using multiple methods.
+    
+    Args:
+        text: Text to process
+        domain: Domain context
+        use_spanbert: Whether to use SpanBERT extraction
+        use_dependency: Whether to use dependency parsing
+        use_entity_linking: Whether to use entity linking
+    """
+    try:
+        # Get enhanced extractor
+        enhanced_extractor = get_enhanced_entity_extractor()
+        
+        # Configure extraction methods
+        enhanced_extractor.use_spanbert = use_spanbert
+        enhanced_extractor.use_dependency = use_dependency
+        enhanced_extractor.use_entity_linking = use_entity_linking
+        
+        # Extract entities and relationships
+        result = enhanced_extractor.extract_entities_and_relations(text, domain)
+        
+        # Convert to response format
+        entities_response = []
+        for entity in result.entities:
+            entities_response.append({
+                "name": entity.name,
+                "type": entity.entity_type,
+                "description": entity.description,
+                "confidence": entity.confidence,
+                "metadata": entity.metadata
+            })
+        
+        relationships_response = []
+        for rel in result.relationships:
+            relationships_response.append({
+                "source": rel.source,
+                "target": rel.target,
+                "relation_type": rel.relation_type,
+                "context": rel.context,
+                "confidence": rel.confidence,
+                "metadata": rel.metadata
+            })
+        
+        return {
+            "text": text,
+            "domain": domain,
+            "entities": entities_response,
+            "relationships": relationships_response,
+            "claims": result.claims,
+            "entity_count": len(result.entities),
+            "relationship_count": len(result.relationships),
+            "extraction_method": "enhanced",
+            "extraction_metadata": result.extraction_metadata,
+            "span_extractions": result.span_extractions,
+            "dependency_extractions": result.dependency_extractions,
+            "linked_entities": result.linked_entities
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced extraction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extraction-stats")
+async def get_extraction_stats():
+    """Get statistics about available extraction methods."""
+    try:
+        enhanced_extractor = get_enhanced_entity_extractor()
+        stats = enhanced_extractor.get_extraction_stats()
+        
+        return {
+            "enhanced_extraction_stats": stats,
+            "available_methods": stats["extraction_methods"],
+            "spanbert_available": stats["spanbert_available"],
+            "dependency_available": stats["dependency_available"],
+            "entity_linking_available": stats["entity_linking_available"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting extraction stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/test-enhanced-extraction")
+async def test_enhanced_extraction(
+    text: str = Form(...),
+    domain: str = Form("general")
+):
+    """Test the enhanced extraction with a sample text."""
+    try:
+        enhanced_extractor = get_enhanced_entity_extractor()
+        
+        # Test with all methods enabled
+        result = enhanced_extractor.extract_entities_and_relations(text, domain)
+        
+        return {
+            "success": True,
+            "message": "Enhanced extraction test completed",
+            "entities_found": len(result.entities),
+            "relationships_found": len(result.relationships),
+            "extraction_methods_used": result.extraction_metadata.get("extraction_methods", []),
+            "sample_entities": [
+                {
+                    "name": entity.name,
+                    "type": entity.entity_type,
+                    "confidence": entity.confidence,
+                    "extraction_method": entity.metadata.get("extraction_method", "unknown")
+                }
+                for entity in result.entities[:5]  # Show first 5 entities
+            ],
+            "sample_relationships": [
+                {
+                    "source": rel.source,
+                    "target": rel.target,
+                    "relation_type": rel.relation_type,
+                    "confidence": rel.confidence,
+                    "extraction_method": rel.metadata.get("extraction_method", "unknown")
+                }
+                for rel in result.relationships[:5]  # Show first 5 relationships
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced extraction test: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Enhanced extraction test failed"
+        }
 
 if __name__ == "__main__":
     import uvicorn

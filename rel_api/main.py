@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 import os
 import numpy as np
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,17 +58,60 @@ class EntityRequest(BaseModel):
 
 # Global variables for model
 gliner_model = None
+gliner_pipeline = None
 model_info = {}
 
 def load_gliner_model():
-    """Load the GLiNER model."""
-    global gliner_model, model_info
+    """Load the GLiNER model and pipeline."""
+    global gliner_model, gliner_pipeline, model_info
     
     try:
         logger.info("Loading GLiNER model...")
         
         from gliner import GLiNER
         gliner_model = GLiNER.from_pretrained("knowledgator/gliner-multitask-large-v0.5")
+        
+        # Create the relationship extraction pipeline using utca
+        try:
+            from utca.core import RenameAttribute
+            from utca.implementation.predictors import (
+                GLiNERPredictor,
+                GLiNERPredictorConfig
+            )
+            from utca.implementation.tasks import (
+                GLiNER,
+                GLiNERPreprocessor,
+                GLiNERRelationExtraction,
+                GLiNERRelationExtractionPreprocessor,
+            )
+            
+            predictor = GLiNERPredictor(
+                GLiNERPredictorConfig(
+                    model_name="knowledgator/gliner-multitask-large-v0.5",
+                    device="cpu",  # Use CPU for Docker compatibility
+                )
+            )
+            
+            gliner_pipeline = (
+                GLiNER(
+                    predictor=predictor,
+                    preprocess=GLiNERPreprocessor(threshold=0.7)
+                )
+                | RenameAttribute("output", "entities")
+                | GLiNERRelationExtraction(
+                    predictor=predictor,
+                    preprocess=(
+                        GLiNERPreprocessor(threshold=0.5)
+                        | GLiNERRelationExtractionPreprocessor()
+                    )
+                )
+            )
+            
+            logger.info("✅ GLiNER pipeline created successfully")
+            
+        except ImportError as e:
+            logger.warning(f"utca library not available, falling back to basic GLiNER: {e}")
+            gliner_pipeline = None
         
         # Store model info
         model_info = {
@@ -82,7 +126,8 @@ def load_gliner_model():
                 "Question-answering",
                 "Open Information Extraction"
             ],
-            "supported_tasks": "Multi-task information extraction"
+            "supported_tasks": "Multi-task information extraction",
+            "pipeline_available": gliner_pipeline is not None
         }
         
         logger.info("✅ GLiNER model loaded successfully")
@@ -200,80 +245,110 @@ async def extract_relations(request: RelationRequest):
     try:
         start_time = datetime.now()
         
-        # First, extract entities to get the entity spans
-        entity_labels = request.entity_labels or []
-        raw_entities = gliner_model.predict_entities(
-            request.text, 
-            entity_labels, 
-            threshold=request.threshold
-        )
-        
-        # Filter and clean entities
-        valid_entities = []
-        for entity in raw_entities:
-            cleaned_text = clean_entity_text(entity["text"])
-            if is_valid_entity(cleaned_text, entity["label"], entity["score"]):
-                valid_entity = {
-                    "text": cleaned_text,
-                    "label": entity["label"],
-                    "score": float(entity["score"]) if isinstance(entity["score"], np.floating) else entity["score"],
-                    "start": entity.get("start", 0),
-                    "end": entity.get("end", 0)
-                }
-                valid_entities.append(valid_entity)
-        
-        # Now extract relationships using the valid entities and relation definitions
-        processed_relations = []
-        seen_relations = set()  # To avoid duplicates
-        
-        for relation_def in request.relations:
-            relation_name = relation_def.get("relation", "")
-            pairs_filter = relation_def.get("pairs_filter", [])
+        # Use the utca pipeline for proper relationship extraction if available
+        if gliner_pipeline is not None:
+            logger.info("Using GLiNER pipeline for relationship extraction")
             
-            # For each relation type, try to find entity pairs that match the filter
-            for entity1 in valid_entities:
-                for entity2 in valid_entities:
-                    if entity1 == entity2:
-                        continue
-                    
-                    # Check if this pair matches the relation filter
-                    entity1_type = entity1["label"].lower()
-                    entity2_type = entity2["label"].lower()
-                    
-                    for filter_pair in pairs_filter:
-                        if (entity1_type == filter_pair[0] and entity2_type == filter_pair[1]):
-                            # This pair matches the relation filter
-                            # Check if they appear in the same sentence or close proximity
-                            entity1_text = entity1["text"]
-                            entity2_text = entity2["text"]
-                            
-                            # Create a unique key for this relation to avoid duplicates
-                            relation_key = f"{entity1_text}:{entity2_text}:{relation_name}"
-                            if relation_key in seen_relations:
-                                continue
-                            
-                            # Simple proximity check - entities should be in the same sentence
-                            if entity1_text in request.text and entity2_text in request.text:
-                                # Calculate combined confidence
-                                combined_score = min(entity1.get("score", 0.5), entity2.get("score", 0.5))
+            # Convert the request relations to the format expected by the pipeline
+            pipeline_relations = []
+            for relation_def in request.relations:
+                pipeline_relation = {
+                    "relation": relation_def.get("relation", ""),
+                    "pairs_filter": relation_def.get("pairs_filter", []),
+                    "distance_threshold": relation_def.get("distance_threshold", 100)
+                }
+                pipeline_relations.append(pipeline_relation)
+            
+            # Run the pipeline
+            pipeline_input = {
+                "text": request.text,
+                "labels": request.entity_labels or [],
+                "relations": pipeline_relations
+            }
+            
+            result = gliner_pipeline.run(pipeline_input)
+            
+            # Process the pipeline output
+            processed_relations = []
+            if "output" in result:
+                for relation in result["output"]:
+                    processed_relation = {
+                        "source": relation.get("source", ""),
+                        "target": relation.get("target", ""),
+                        "label": relation.get("relation", ""),
+                        "score": relation.get("score", 0.5),
+                        "context": relation.get("context", ""),
+                        "source_type": relation.get("source_type", "entity"),
+                        "target_type": relation.get("target_type", "entity")
+                    }
+                    processed_relations.append(processed_relation)
+            
+        else:
+            # Fallback to basic GLiNER entity extraction
+            logger.info("Using basic GLiNER for entity extraction (no relationship pipeline available)")
+            
+            # Extract entities first
+            raw_entities = gliner_model.predict_entities(
+                request.text, 
+                request.entity_labels or [], 
+                threshold=request.threshold
+            )
+            
+            # Filter and clean entities
+            valid_entities = []
+            for entity in raw_entities:
+                cleaned_text = clean_entity_text(entity["text"])
+                if is_valid_entity(cleaned_text, entity["label"], entity["score"]):
+                    valid_entity = {
+                        "text": cleaned_text,
+                        "label": entity["label"],
+                        "score": float(entity["score"]) if isinstance(entity["score"], np.floating) else entity["score"],
+                        "start": entity.get("start", 0),
+                        "end": entity.get("end", 0)
+                    }
+                    valid_entities.append(valid_entity)
+            
+            # Create simple relationships based on entity proximity
+            processed_relations = []
+            seen_relations = set()
+            
+            for relation_def in request.relations:
+                relation_name = relation_def.get("relation", "")
+                pairs_filter = relation_def.get("pairs_filter", [])
+                
+                for entity1 in valid_entities:
+                    for entity2 in valid_entities:
+                        if entity1 == entity2:
+                            continue
+                        
+                        # Check if this pair matches the relation filter
+                        entity1_type = entity1["label"].lower()
+                        entity2_type = entity2["label"].lower()
+                        
+                        for filter_pair in pairs_filter:
+                            if (entity1_type == filter_pair[0] and entity2_type == filter_pair[1]):
+                                # Create a unique key for this relation
+                                relation_key = f"{entity1['text']}:{entity2['text']}:{relation_name}"
+                                if relation_key in seen_relations:
+                                    continue
                                 
-                                # Only include high-confidence relationships
-                                if combined_score >= 0.7:
-                                    relation = {
-                                        "source": entity1_text,
-                                        "target": entity2_text,
-                                        "label": relation_name,
-                                        "score": combined_score,
-                                        "context": f"{entity1_text} {relation_name} {entity2_text}",
-                                        "source_type": entity1_type,
-                                        "target_type": entity2_type
-                                    }
-                                    processed_relations.append(relation)
-                                    seen_relations.add(relation_key)
+                                # Simple proximity check
+                                if entity1["text"] in request.text and entity2["text"] in request.text:
+                                    combined_score = min(entity1.get("score", 0.5), entity2.get("score", 0.5))
+                                    
+                                    if combined_score >= 0.5:
+                                        relation = {
+                                            "source": entity1["text"],
+                                            "target": entity2["text"],
+                                            "label": relation_name,
+                                            "score": combined_score,
+                                            "context": f"{entity1['text']} {relation_name} {entity2['text']}",
+                                            "source_type": entity1_type,
+                                            "target_type": entity2_type
+                                        }
+                                        processed_relations.append(relation)
+                                        seen_relations.add(relation_key)
                                 break
-                    
-                    # Only process each pair once
-                    break
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
@@ -283,10 +358,10 @@ async def extract_relations(request: RelationRequest):
             processing_time=processing_time,
             model_info=model_info
         )
-        
     except Exception as e:
-        logger.error(f"Error processing relation extraction request: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}")
+        tb = traceback.format_exc()
+        logger.error(f"Error processing relation extraction request: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}\n{tb}")
 
 @app.post("/extract-relations/batch", response_model=BatchRelationResponse)
 async def extract_relations_batch(request: BatchRelationRequest):

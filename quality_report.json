@@ -1,0 +1,97 @@
+{
+  "enhanced-query": {
+    "endpoint": "enhanced-query",
+    "test_queries": 3,
+    "successful_requests": 3,
+    "average_quality": 0.8340873015873017,
+    "results": [
+      {
+        "query": "What is machine learning?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.8825000000000001, issues=['Low factual accuracy: 0.75'], suggestions=['Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.825, relevance_score=1.0, completeness_score=0.8, coherence_score=1.0, factual_accuracy=0.75, overall_quality=0.8825000000000001, validation_passed=False, issues=['Low factual accuracy: 0.75']))",
+        "response_time": 7.251926
+      },
+      {
+        "query": "How does deep learning relate to machine learning?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.7964285714285714, issues=['Low factual accuracy: 0.70'], suggestions=['Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.7999999999999999, relevance_score=0.7857142857142858, completeness_score=0.7, coherence_score=1.0, factual_accuracy=0.7, overall_quality=0.7964285714285714, validation_passed=False, issues=['Low factual accuracy: 0.70']))",
+        "response_time": 9.200551
+      },
+      {
+        "query": "What is the difference between supervised and unsupervised learning?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.8233333333333335, issues=['Low factual accuracy: 0.75'], suggestions=['Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.85, relevance_score=0.7333333333333334, completeness_score=0.8, coherence_score=1.0, factual_accuracy=0.75, overall_quality=0.8233333333333335, validation_passed=False, issues=['Low factual accuracy: 0.75']))",
+        "response_time": 12.696897
+      }
+    ]
+  },
+  "advanced-reasoning": {
+    "endpoint": "advanced-reasoning",
+    "test_queries": 2,
+    "successful_requests": 2,
+    "average_quality": 0.0,
+    "results": [
+      {
+        "query": "How does machine learning compare to deep learning?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.306741
+      },
+      {
+        "query": "What causes improvements in technology?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.279662
+      }
+    ]
+  },
+  "causal-reasoning": {
+    "endpoint": "causal-reasoning",
+    "test_queries": 2,
+    "successful_requests": 2,
+    "average_quality": 0.0,
+    "results": [
+      {
+        "query": "What causes climate change?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.284832
+      },
+      {
+        "query": "How does machine learning cause improvements?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.34724
+      }
+    ]
+  },
+  "comparative-reasoning": {
+    "endpoint": "comparative-reasoning",
+    "test_queries": 2,
+    "successful_requests": 2,
+    "average_quality": 0.0,
+    "results": [
+      {
+        "query": "Compare supervised and unsupervised learning",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.298154
+      },
+      {
+        "query": "How do neural networks compare to traditional algorithms?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.305614
+      }
+    ]
+  },
+  "multi-hop-reasoning": {
+    "endpoint": "multi-hop-reasoning",
+    "test_queries": 2,
+    "successful_requests": 2,
+    "average_quality": 0.0,
+    "results": [
+      {
+        "query": "How does AI relate to machine learning?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.30205
+      },
+      {
+        "query": "What connects deep learning to artificial intelligence?",
+        "validation": "ValidationResult(is_valid=False, confidence=0.0, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters'], suggestions=['Consider adding more specific information to increase confidence', 'Ensure the answer directly addresses the query terms', 'Provide more comprehensive coverage of the topic', 'Improve answer structure with better transitions and organization', 'Address the identified quality issues'], metrics=QualityMetrics(confidence_score=0.0, relevance_score=0.0, completeness_score=0.0, coherence_score=0.0, factual_accuracy=0.0, overall_quality=0.0, validation_passed=False, issues=['Low confidence score: 0.00', 'Low relevance score: 0.00', 'Low completeness score: 0.00', 'Low coherence score: 0.00', 'Low factual accuracy: 0.00', 'Answer too short: 0 characters']))",
+        "response_time": 0.311212
+      }
+    ]
+  }
+}
