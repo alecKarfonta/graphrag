@@ -95,6 +95,11 @@ class ExtractionRequest(BaseModel):
     text: str
     domain: str = "general"
 
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = 10
+    threshold: float = 0.0
+
 @app.get("/")
 def read_root():
     return {"message": "Graph RAG backend is running."}
