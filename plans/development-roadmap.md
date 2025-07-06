@@ -1,5 +1,12 @@
 # Comprehensive Graph RAG System Development Plan
 
+
+# User requests
+- [ ] Reddit crawler: a way to submit a query or topic and have the system pull popular, or otherwise highly related information from reddit and load it into the ingestion system. This may require crawling reddit with a browser. Also limit the depth of recursion used when adding comments to the data that we parse.
+
+
+- [ ] Code RAG: Implementation that focuses soley on code retriveal
+
 ## Executive Summary
 
 This plan outlines the development of a state-of-the-art Graph RAG system that combines knowledge graphs with vector search to provide superior question-answering capabilities for niche domains. The system will include document processing, entity extraction, knowledge graph construction, online information gathering, interactive visualization, and intuitive user interaction.

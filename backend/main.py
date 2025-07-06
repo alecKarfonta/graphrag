@@ -24,6 +24,7 @@ from entity_linker import EntityLinker
 from graph_reasoner import GraphReasoner
 from advanced_reasoning_engine import AdvancedReasoningEngine
 from enhanced_entity_extractor import EnhancedEntityExtractor, get_enhanced_entity_extractor
+from code_detector import CodeDetector, CodeRAGRouter, HybridDocumentProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,19 @@ advanced_reasoning_engine = AdvancedReasoningEngine()
 enhanced_query_processor = EnhancedQueryProcessor()
 entity_linker = EntityLinker()
 graph_reasoner = GraphReasoner()
+
+# Initialize code detection components
+try:
+    from code_detector import CodeDetector, CodeRAGRouter, HybridDocumentProcessor
+    code_detector = CodeDetector()
+    code_rag_router = CodeRAGRouter()
+    hybrid_processor = HybridDocumentProcessor()
+    print("✅ Code detection components initialized successfully")
+except Exception as e:
+    print(f"⚠️ Code detection initialization failed: {e}")
+    code_detector = None
+    code_rag_router = None
+    hybrid_processor = None
 
 class AdvancedSearchRequest(BaseModel):
     query: str
@@ -1711,6 +1725,136 @@ async def test_enhanced_extraction(
             "error": str(e),
             "message": "Enhanced extraction test failed"
         }
+
+@app.get("/code-detection/health")
+async def check_code_rag_health():
+    """Check if Code RAG is available and healthy."""
+    if not code_rag_router:
+        raise HTTPException(status_code=503, detail="Code detection not available")
+    
+    return code_rag_router.check_code_rag_health()
+
+@app.post("/code-detection/detect")
+async def detect_code_file(file: UploadFile = File(...)):
+    """Detect if an uploaded file is a code file and determine its language."""
+    if not code_detector:
+        raise HTTPException(status_code=503, detail="Code detection not available")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+    
+    try:
+        # Detect code file
+        file_info = code_detector.get_code_file_info(temp_file_path)
+        
+        return {
+            "filename": file.filename,
+            "file_info": file_info,
+            "is_code": file_info["is_code"],
+            "language": file_info.get("language"),
+            "file_size": file_info["file_size"],
+            "line_count": file_info.get("line_count", 0)
+        }
+    finally:
+        # Clean up temporary file
+        os.unlink(temp_file_path)
+
+@app.post("/code-detection/route")
+async def route_code_file(file: UploadFile = File(...), project_name: str = None):
+    """Route a code file to Code RAG for specialized processing."""
+    if not code_rag_router:
+        raise HTTPException(status_code=503, detail="Code RAG routing not available")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+    
+    try:
+        # Route to Code RAG
+        result = code_rag_router.route_file_to_code_rag(temp_file_path, project_name)
+        return result
+    finally:
+        # Clean up temporary file
+        os.unlink(temp_file_path)
+
+@app.post("/hybrid/process")
+async def process_file_hybrid(file: UploadFile = File(...), domain: str = "general"):
+    """Process a file using hybrid approach: code files to Code RAG, others to GraphRAG."""
+    if not hybrid_processor:
+        raise HTTPException(status_code=503, detail="Hybrid processing not available")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+    
+    try:
+        # Process with hybrid approach
+        result = hybrid_processor.process_file_hybrid(temp_file_path, domain)
+        return result
+    finally:
+        # Clean up temporary file
+        os.unlink(temp_file_path)
+
+@app.get("/hybrid/status")
+async def get_hybrid_status():
+    """Get status of both GraphRAG and Code RAG systems."""
+    if not hybrid_processor:
+        raise HTTPException(status_code=503, detail="Hybrid processing not available")
+    
+    return hybrid_processor.get_system_status()
+
+@app.post("/search/code")
+async def search_code_in_graphrag(request: SearchRequest):
+    """Search for code-related information in GraphRAG."""
+    try:
+        # Use the existing search endpoint but filter for code domain
+        search_response = hybrid_retriever.search(
+            query=request.query,
+            top_k=request.top_k,
+            threshold=request.threshold
+        )
+        
+        # Filter results for code-related content
+        code_results = []
+        for result in search_response.results:
+            # Check if result is code-related
+            if self._is_code_related(result):
+                code_results.append({
+                    "content": result.content,
+                    "source": result.source,
+                    "score": result.score,
+                    "result_type": result.result_type,
+                    "metadata": result.metadata
+                })
+        
+        return {
+            "query": request.query,
+            "results": code_results,
+            "total_results": len(code_results),
+            "search_time_ms": search_response.search_time_ms,
+            "domain": "code"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Code search failed: {str(e)}")
+
+def _is_code_related(self, result):
+    """Check if a search result is code-related."""
+    content_lower = result.content.lower()
+    code_keywords = [
+        'function', 'class', 'method', 'variable', 'import', 'export',
+        'def ', 'class ', 'function ', 'var ', 'let ', 'const ',
+        'public', 'private', 'protected', 'static', 'async', 'await'
+    ]
+    
+    return any(keyword in content_lower for keyword in code_keywords)
 
 if __name__ == "__main__":
     import uvicorn
