@@ -5,7 +5,7 @@
 - [ ] Reddit crawler: a way to submit a query or topic and have the system pull popular, or otherwise highly related information from reddit and load it into the ingestion system. This may require crawling reddit with a browser. Also limit the depth of recursion used when adding comments to the data that we parse.
 
 
-- [ ] Code RAG: Implementation that focuses soley on code retriveal
+- [ ] Code RAG: Alternate functions that focuses soley on code retriveal. 
 
 ## Executive Summary
 
