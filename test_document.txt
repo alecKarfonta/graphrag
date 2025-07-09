@@ -1,8 +1,23 @@
-Machine Learning and Artificial Intelligence
-
-Introduction
+Machine Learning Fundamentals
 
 Machine learning is a subset of artificial intelligence that enables computers to learn and improve from experience without being explicitly programmed. It focuses on developing algorithms that can access data and use it to learn for themselves.
+
+Deep Learning
+Deep learning is a subset of machine learning that uses artificial neural networks with multiple layers to model and understand complex patterns in data. It has been particularly successful in areas like computer vision, natural language processing, and speech recognition.
+
+Neural Networks
+Neural networks are computational models inspired by biological neural networks. They consist of interconnected nodes (neurons) that process information and can learn to recognize patterns in data.
+
+Supervised Learning
+Supervised learning is a type of machine learning where the algorithm learns from labeled training data. The goal is to learn a mapping from inputs to outputs based on example input-output pairs.
+
+Unsupervised Learning
+Unsupervised learning is a type of machine learning where the algorithm learns patterns from unlabeled data. The goal is to discover hidden structures or patterns in the data without any predefined labels.
+
+Artificial Intelligence
+Artificial intelligence (AI) is the simulation of human intelligence in machines that are programmed to think and learn like humans. Machine learning is a key component of AI, providing the ability to learn from data.
+
+The relationship between these concepts is hierarchical: AI encompasses machine learning, which includes deep learning as a specialized approach using neural networks. Supervised and unsupervised learning are different strategies within machine learning for training models.
 
 Types of Machine Learning
 

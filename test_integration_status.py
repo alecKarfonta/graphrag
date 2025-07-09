@@ -6,6 +6,7 @@ Quick test to check which enhanced features are working and which need fixes.
 
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000"
 

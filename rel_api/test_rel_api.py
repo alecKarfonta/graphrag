@@ -10,6 +10,7 @@ from typing import Dict, Any
 
 # API configuration
 BASE_URL = "http://localhost:8002"
+headers = {"Content-Type": "application/json"}
 
 def test_health():
     """Test the health endpoint."""
@@ -140,7 +141,7 @@ def test_relation_extraction():
             print(f"   Processing time: {data['processing_time']:.3f}s")
             
             for relation in data['relations'][:5]:  # Show first 5 relations
-                print(f"   - {relation['text']} ({relation['label']}) - Score: {relation['score']:.3f}")
+                print(f"   - {relation['source']} -> {relation['target']} ({relation['label']}) - Score: {relation['score']:.3f}")
             
             return True
         else:
@@ -191,7 +192,7 @@ def test_batch_extraction():
                 print(f"   Text {i+1}: {result['relation_count']} relations found")
                 if result['relation_count'] > 0:
                     for relation in result['relations'][:3]:  # Show first 3 relations
-                        print(f"     - {relation['text']} ({relation['label']})")
+                        print(f"     - {relation['source']} -> {relation['target']} ({relation['label']})")
             
             return True
         else:
@@ -202,10 +203,18 @@ def test_batch_extraction():
         print(f"❌ Batch extraction error: {e}")
         return False
 
-def main():
+def run_tests():
     """Run all tests."""
+    
     print("🚀 Starting GLiNER Relationship Extraction API tests...")
-    print("=" * 60)
+    print("============================================================")
+    
+    # Wait for the service to start
+    print("🕒 Waiting for the service to start (60s)...")
+    time.sleep(60)
+    
+    # Test counters
+    passed_tests = 0
     
     tests = [
         ("Health Check", test_health),
@@ -216,28 +225,27 @@ def main():
         ("Batch Extraction", test_batch_extraction)
     ]
     
-    passed = 0
     total = len(tests)
     
     for test_name, test_func in tests:
         try:
             if test_func():
-                passed += 1
+                passed_tests += 1
             else:
                 print(f"❌ {test_name} failed")
         except Exception as e:
             print(f"❌ {test_name} error: {e}")
     
     print("\n" + "=" * 60)
-    print(f"📊 Test Results: {passed}/{total} tests passed")
+    print(f"📊 Test Results: {passed_tests}/{total} tests passed")
     
-    if passed == total:
+    if passed_tests == total:
         print("🎉 All tests passed! GLiNER API is working correctly.")
     else:
         print("⚠️  Some tests failed. Check the logs above for details.")
     
-    return passed == total
+    return passed_tests == total
 
 if __name__ == "__main__":
-    success = main()
+    success = run_tests()
     exit(0 if success else 1) 

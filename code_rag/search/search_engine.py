@@ -70,8 +70,25 @@ class CodeSearchEngine:
         
         self.entity_embeddings.extend(new_embeddings)
         self._indexed = True
+
+        # Index structural information
+        self._index_structural_info()
     
-    def search(self, query: str, context: SearchContext = None, 
+    def _index_structural_info(self):
+        """Index structural information for faster search."""
+        # Create a map of entity names to entities for quick lookup
+        self.entity_map = {entity.name: entity for entity in self.entities}
+        
+        # Create a map of functions that are called by other functions
+        self.call_map = {}
+        for entity in self.entities:
+            if isinstance(entity, FunctionEntity) and entity.calls:
+                for called_function in entity.calls:
+                    if called_function not in self.call_map:
+                        self.call_map[called_function] = []
+                    self.call_map[called_function].append(entity.name)
+    
+    def search(self, query: str, context: Optional[SearchContext] = None, 
               top_k: int = 10, threshold: float = 0.0) -> SearchResponse:
         """Main search entry point."""
         start_time = time.time()
@@ -88,6 +105,7 @@ class CodeSearchEngine:
         
         # Classify query intent
         intent = self._classify_query_intent(query)
+        print(f"Query: '{query}', Intent: {intent}") # DEBUG
         
         # Execute search based on intent
         if intent == QueryIntent.SEMANTIC:
@@ -183,100 +201,70 @@ class CodeSearchEngine:
     def _structural_search(self, query: str, top_k: int) -> List[SearchResult]:
         """Search based on code structure (inheritance, calls, etc.)."""
         results = []
-        query_lower = query.lower()
+        query_parts = query.lower().split()
         
-        for entity in self.entities:
-            score = 0.0
-            explanations = []
-            
-            if isinstance(entity, ClassEntity):
-                # Check inheritance
-                for base_class in entity.base_classes:
-                    if query_lower in base_class.lower():
-                        score += 0.8
-                        explanations.append(f"inherits from {base_class}")
-                
-                # Check interfaces
-                for interface in entity.interfaces:
-                    if query_lower in interface.lower():
-                        score += 0.7
-                        explanations.append(f"implements {interface}")
-            
-            elif isinstance(entity, FunctionEntity):
-                # Check function calls
-                for call in entity.calls:
-                    if query_lower in call.lower():
-                        score += 0.6
-                        explanations.append(f"calls {call}")
-                
-                # Check class membership
-                if entity.class_name and query_lower in entity.class_name.lower():
-                    score += 0.9
-                    explanations.append(f"method of {entity.class_name}")
-            
-            if score > 0:
-                explanation = "; ".join(explanations)
-                result = SearchResult(
-                    entity=entity,
-                    score=min(score, 1.0),  # Cap at 1.0
-                    explanation=f"Structural match: {explanation}",
-                    match_type="structural",
-                    metadata={"structural_matches": explanations}
-                )
-                results.append(result)
-        
+        # Simple structural query parsing (e.g., "calls <function_name>")
+        if len(query_parts) == 2 and query_parts[0] == "calls":
+            called_function = query_parts[1]
+            if called_function in self.call_map:
+                calling_functions = self.call_map[called_function]
+                for func_name in calling_functions:
+                    if func_name in self.entity_map:
+                        entity = self.entity_map[func_name]
+                        result = SearchResult(
+                            entity=entity,
+                            score=0.9,  # High score for direct structural match
+                            explanation=f"Calls {called_function}",
+                            match_type="structural",
+                            metadata={"type": "function_call"}
+                        )
+                        results.append(result)
+
         # Sort by score and return top_k
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:top_k]
     
     def _functional_search(self, query: str, top_k: int, threshold: float) -> List[SearchResult]:
-        """Search for functionality (authentication, logging, etc.)."""
-        # Combine semantic search with keyword matching
-        semantic_results = self._semantic_search(query, top_k * 2, threshold)
+        """Search based on functional purpose (docstrings)."""
+        # This is essentially a semantic search on docstrings
+        docstrings = [entity.docstring for entity in self.entities if hasattr(entity, 'docstring') and entity.docstring]
+        entities_with_docstrings = [entity for entity in self.entities if hasattr(entity, 'docstring') and entity.docstring]
         
-        # Boost results that match functional keywords
-        functional_keywords = {
-            "auth": ["authenticate", "login", "password", "token", "session"],
-            "log": ["log", "logger", "debug", "info", "error", "warn"],
-            "db": ["database", "query", "connection", "sql", "orm"],
-            "api": ["request", "response", "endpoint", "route", "handler"],
-            "validate": ["validate", "check", "verify", "sanitize"],
-            "parse": ["parse", "decode", "serialize", "json", "xml"],
-            "error": ["error", "exception", "handle", "catch", "raise"]
-        }
-        
-        query_lower = query.lower()
-        
-        for result in semantic_results:
-            entity = result.entity
-            boost = 0.0
+        if not docstrings:
+            return []
             
-            # Check if entity name or docstring contains functional keywords
-            entity_text = f"{entity.name} {getattr(entity, 'docstring', '') or ''}".lower()
-            
-            for category, keywords in functional_keywords.items():
-                if category in query_lower:
-                    for keyword in keywords:
-                        if keyword in entity_text:
-                            boost += 0.2
-                            break
-            
-            # Apply boost
-            result.score = min(result.score + boost, 1.0)
-            if boost > 0:
-                result.explanation += f" (functional boost: +{boost:.2f})"
+        # Embed the query and docstrings
+        print(f"Functional search query: {query}") # DEBUG
+        print(f"Entities with docstrings: {[entity.name for entity in entities_with_docstrings]}") # DEBUG
+        query_embedding = self.embedder.embed_query(query)
+        docstring_embeddings = [self.embedder.embed_query(doc) for doc in docstrings]
         
-        # Re-sort and return top_k
-        semantic_results.sort(key=lambda x: x.score, reverse=True)
-        return semantic_results[:top_k]
+        # Find similar docstrings
+        similar_entities = self.embedder.find_similar_entities(
+            query_embedding,
+            docstring_embeddings,
+            entities_with_docstrings,
+            top_k,
+            threshold
+        )
+        
+        # Convert to search results
+        results = []
+        for similarity, entity in similar_entities:
+            result = SearchResult(
+                entity=entity,
+                score=similarity,
+                explanation=f"Functional match on docstring (similarity: {similarity:.3f})",
+                match_type="functional",
+                metadata={"similarity": similarity}
+            )
+            results.append(result)
+            
+        return results
     
     def _classify_query_intent(self, query: str) -> QueryIntent:
-        """Classify the intent of the search query."""
+        """Classify the user's query intent."""
         query_lower = query.lower()
-        
-        # Exact match patterns
-        if len(query.split()) == 1 and query.isidentifier():
-            return QueryIntent.EXACT
         
         # Structural patterns
         structural_patterns = [
@@ -301,6 +289,10 @@ class CodeSearchEngine:
         ]
         if any(keyword in query_lower for keyword in pattern_keywords):
             return QueryIntent.PATTERN
+        
+        # Exact match patterns
+        if len(query.split()) == 1 and query.isidentifier():
+            return QueryIntent.EXACT
         
         # Default to semantic
         return QueryIntent.SEMANTIC

@@ -6,6 +6,7 @@ import pytest
 import tempfile
 import os
 from pathlib import Path
+import numpy as np
 
 from code_rag.parsers.python_parser import PythonParser
 from code_rag.search.search_engine import CodeSearchEngine, SearchContext
@@ -225,7 +226,7 @@ class TestCodeEmbedder:
         
         assert embedding is not None
         assert len(embedding) > 0
-        assert isinstance(embedding[0], float)
+        assert isinstance(embedding[0], (float, np.floating))
     
     def test_embed_class(self):
         """Test class embedding generation."""
@@ -233,7 +234,7 @@ class TestCodeEmbedder:
         
         assert embedding is not None
         assert len(embedding) > 0
-        assert isinstance(embedding[0], float)
+        assert isinstance(embedding[0], (float, np.floating))
     
     def test_embed_query(self):
         """Test query embedding generation."""
@@ -241,7 +242,7 @@ class TestCodeEmbedder:
         
         assert embedding is not None
         assert len(embedding) > 0
-        assert isinstance(embedding[0], float)
+        assert isinstance(embedding[0], (float, np.floating))
     
     def test_similarity_calculation(self):
         """Test similarity calculation between embeddings."""
@@ -312,7 +313,7 @@ class TestCodeSearchEngine:
                 line_start=5,
                 line_end=10,
                 language="python",
-                docstring="Log a message with specified level."
+                docstring="Log a message with specified level for logging."
             )
         ]
         

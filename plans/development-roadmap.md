@@ -1,36 +1,37 @@
 # Comprehensive Graph RAG System Development Plan
 
-
-# User requests
-- [ ] Reddit crawler: a way to submit a query or topic and have the system pull popular, or otherwise highly related information from reddit and load it into the ingestion system. This may require crawling reddit with a browser. Also limit the depth of recursion used when adding comments to the data that we parse.
-
-
-- [ ] Code RAG: Alternate functions that focuses soley on code retriveal. 
+## User Requests Status
+- [x] **Reddit crawler**: ✅ COMPLETED - A comprehensive Reddit crawling service has been implemented with multi-modal crawling, configurable depth control, smart filtering, and auto-integration with GraphRAG
+- [x] **Code RAG**: ✅ COMPLETED - Code RAG system has been fully implemented and integrated with GraphRAG for unified code search and analysis capabilities
 
 ## Executive Summary
 
-This plan outlines the development of a state-of-the-art Graph RAG system that combines knowledge graphs with vector search to provide superior question-answering capabilities for niche domains. The system will include document processing, entity extraction, knowledge graph construction, online information gathering, interactive visualization, and intuitive user interaction.
+This plan outlines the development of a state-of-the-art Graph RAG system that combines knowledge graphs with vector search to provide superior question-answering capabilities for niche domains. The system includes document processing, entity extraction, knowledge graph construction, online information gathering, interactive visualization, and intuitive user interaction.
 
 ## Current Implementation Status
 
-### ✅ Completed Features
+### ✅ Completed Features (Updated)
+
 1. **Core Infrastructure**
    - FastAPI backend with comprehensive API endpoints
    - React TypeScript frontend with modern UI
    - Docker Compose deployment with Neo4j and Qdrant
    - Redis caching for performance optimization
+   - **NEW**: Persistent storage system with backup/restore capabilities
 
 2. **Document Processing Pipeline**
    - Multi-format document ingestion (PDF, DOCX, TXT, HTML, CSV, JSON)
    - Enhanced document processor with semantic chunking
    - Metadata extraction and structure preservation
    - Batch processing capabilities
+   - **NEW**: Code file detection and specialized processing
 
 3. **Entity Extraction & Knowledge Graph**
    - LLM-based entity extraction using Claude 3 Sonnet
    - Domain-specific entity types (automotive, medical, legal, technical)
    - Relationship extraction and validation
    - Neo4j knowledge graph construction with APOC plugins
+   - **NEW**: Code-specific entity extraction (functions, classes, variables, modules)
 
 4. **Hybrid Search Engine**
    - Vector search using Qdrant and SentenceTransformers
@@ -38,6 +39,7 @@ This plan outlines the development of a state-of-the-art Graph RAG system that c
    - Keyword search capabilities
    - Query analysis and intent classification
    - Multi-hop reasoning framework
+   - **NEW**: Code-specific search with AST parsing and semantic analysis
 
 5. **User Interface**
    - Interactive document upload with drag-and-drop
@@ -51,96 +53,95 @@ This plan outlines the development of a state-of-the-art Graph RAG system that c
    - Entity extraction validation
    - Hybrid search testing
    - Full pipeline integration tests
+   - **NEW**: Comprehensive evaluation framework with quality metrics
+   - **NEW**: Automated testing pipeline with performance monitoring
+
+7. **NEW: Reddit Integration**
+   - Multi-modal Reddit crawling (API + HTTP scraping)
+   - Configurable depth control (1-3 levels)
+   - Smart filtering and quality control
+   - Auto-integration with GraphRAG knowledge graph
+   - Real-time monitoring and status tracking
+
+8. **NEW: Code RAG Integration**
+   - Code file detection and routing
+   - AST-based code parsing and analysis
+   - Code-specific entity extraction
+   - Unified search across code and documents
+   - Multi-language support (Python, JavaScript, Java)
+
+9. **NEW: Advanced Query Processing**
+   - Enhanced query processing with intent classification
+   - Advanced reasoning endpoints (causal, comparative, multi-hop)
+   - Query complexity analysis
+   - Quality validation and metrics tracking
+
+10. **NEW: Performance & Monitoring**
+    - Comprehensive performance monitoring
+    - Quality metrics tracking
+    - Automated evaluation framework
+    - Persistent storage with backup/restore
 
 ### 🔄 In Progress
 1. **Performance Optimization**
-   - Batch processing for large documents
-   - Timeout handling for entity extraction
-   - Error recovery and logging improvements
+   - Enhanced query processing (8.8s response time needs improvement)
+   - Advanced reasoning quality (0% quality score needs significant improvement)
+   - Entity extraction accuracy (F1-score 0.133-0.267 needs improvement)
 
 2. **Advanced Query Processing**
-   - Multi-hop reasoning implementation
+   - Multi-hop reasoning implementation (quality issues identified)
    - Query expansion using graph context
    - Advanced intent classification
 
-## Phase 1: Enhanced Evaluation & Quality Assurance (Weeks 1-2)
+### 📊 Current Performance Metrics
 
-### 1.1 Comprehensive Evaluation Framework
+**System Performance:**
+- **Entity Extraction**: 2-3 seconds per document
+- **Query Processing**: 1.7-2.0 seconds average response time
+- **Enhanced Query**: 8.8 seconds average (needs optimization)
+- **Advanced Reasoning**: 0.3 seconds average (quality issues)
+- **Graph Statistics**: <1 second for basic operations
 
-**Implementation:**
-```python
-class GraphRAGEvaluator:
-    def __init__(self):
-        self.metrics = {
-            'entity_extraction_accuracy': self.evaluate_entity_extraction,
-            'relationship_extraction_accuracy': self.evaluate_relationship_extraction,
-            'query_response_accuracy': self.evaluate_query_responses,
-            'graph_completeness': self.evaluate_graph_completeness,
-            'retrieval_relevance': self.evaluate_retrieval_relevance
-        }
-    
-    def evaluate_entity_extraction(self, test_documents: List[str], ground_truth: Dict) -> Dict:
-        """Evaluate entity extraction accuracy against ground truth."""
-        results = {
-            'precision': 0.0,
-            'recall': 0.0,
-            'f1_score': 0.0,
-            'entity_types_accuracy': {},
-            'extraction_confidence': []
-        }
-        
-        for doc in test_documents:
-            extracted_entities = self.entity_extractor.extract_entities_and_relations(doc)
-            # Compare with ground truth and calculate metrics
-            pass
-        
-        return results
-    
-    def evaluate_query_responses(self, test_queries: List[str], expected_answers: List[str]) -> Dict:
-        """Evaluate query response accuracy and relevance."""
-        results = {
-            'answer_accuracy': 0.0,
-            'source_relevance': 0.0,
-            'response_time': [],
-            'reasoning_chain_quality': 0.0
-        }
-        
-        for query, expected in zip(test_queries, expected_answers):
-            response = self.query_processor.process_query(query)
-            # Evaluate response quality
-            pass
-        
-        return results
-```
+**Quality Metrics:**
+- **Entity Extraction F1-Score**: 0.133-0.267 (needs improvement)
+- **Query Response Accuracy**: 0.038-0.048 (needs significant improvement)
+- **Graph Completeness**: 211 nodes, 164 relationships (good foundation)
+- **Retrieval Relevance**: 0.200-0.250 (needs improvement)
+- **Enhanced Query Quality**: 83.4% average (good baseline)
 
-### 1.2 Automated Testing Pipeline
+## Phase 1: Enhanced Evaluation & Quality Assurance ✅ COMPLETED
 
-**Test Categories:**
-- **Unit Tests**: Individual component testing
-- **Integration Tests**: End-to-end pipeline testing
-- **Performance Tests**: Load and stress testing
-- **Quality Tests**: Accuracy and relevance evaluation
+### ✅ 1.1 Comprehensive Evaluation Framework
 
-**Implementation:**
-```python
-class AutomatedTestSuite:
-    def run_comprehensive_tests(self):
-        """Run all test categories and generate reports."""
-        test_results = {
-            'unit_tests': self.run_unit_tests(),
-            'integration_tests': self.run_integration_tests(),
-            'performance_tests': self.run_performance_tests(),
-            'quality_tests': self.run_quality_tests()
-        }
-        
-        # Generate detailed reports
-        self.generate_test_reports(test_results)
-        return test_results
-```
+**Completed Implementation:**
+- Entity extraction evaluation with precision, recall, F1-score
+- Query response evaluation with accuracy assessment
+- Graph completeness evaluation with density metrics
+- Retrieval relevance evaluation with scoring
+- Comprehensive reporting with detailed metrics
 
-## Phase 2: Advanced Query Processing & Reasoning (Weeks 2-4)
+### ✅ 1.2 Automated Testing Pipeline
+
+**Completed Test Categories:**
+- Unit Tests: 100% success rate (7/7 passed)
+- Integration Tests: 75% success rate (3/4 passed)
+- Performance Tests: 60% performance score
+- Quality Tests: 12.7% quality score
+
+**Completed API Integration:**
+- All evaluation endpoints functional
+- Test suite endpoints operational
+- Report generation working
+- Error handling robust
+
+## Phase 2: Advanced Query Processing & Reasoning 🔄 IN PROGRESS
 
 ### 2.1 Multi-Hop Reasoning Engine
+
+**Current Status:**
+- ✅ Basic implementation completed
+- ⚠️ Quality issues identified (0% quality score)
+- 🔄 Needs improvement in response generation
 
 **Implementation:**
 ```python
@@ -197,6 +198,11 @@ class AdvancedReasoningEngine:
 
 ### 2.2 Query Understanding & Intent Classification
 
+**Current Status:**
+- ✅ Basic implementation completed
+- ⚠️ Quality issues identified
+- 🔄 Needs improvement in response generation
+
 **Enhanced Query Analysis:**
 ```python
 class AdvancedQueryProcessor:
@@ -246,9 +252,16 @@ class AdvancedQueryProcessor:
         return strategy
 ```
 
-## Phase 3: Real-time Information Gathering (Weeks 4-6)
+## Phase 3: Real-time Information Gathering ✅ COMPLETED
 
-### 3.1 Web Scraping & Information Monitoring
+### ✅ 3.1 Reddit Crawler Implementation
+
+**Completed Features:**
+- Multi-modal crawling (Reddit API + HTTP scraping)
+- Configurable depth control (1-3 levels)
+- Smart filtering and quality control
+- Auto-integration with GraphRAG knowledge graph
+- Real-time monitoring and status tracking
 
 **Implementation:**
 ```python
@@ -312,9 +325,15 @@ class RealTimeInfoGatherer:
             }])
 ```
 
-### 3.2 Automated Content Curation
+### ✅ 3.2 Automated Content Curation
 
-**Content Quality Assessment:**
+**Completed Features:**
+- Content quality assessment
+- Relevance scoring and filtering
+- Authority and freshness evaluation
+- Automated ingestion into knowledge base
+
+**Implementation:**
 ```python
 class ContentCurator:
     def assess_content_quality(self, content: str, domain: str) -> QualityScore:
@@ -336,9 +355,113 @@ class ContentCurator:
         )
 ```
 
-## Phase 4: Multimodal Capabilities (Weeks 6-8)
+## Phase 4: Code RAG Integration ✅ COMPLETED
 
-### 4.1 Image Processing & Analysis
+### ✅ 4.1 Code Detection & Processing
+
+**Completed Features:**
+- Code file detection and routing
+- AST-based code parsing and analysis
+- Multi-language support (Python, JavaScript, Java)
+- Code-specific entity extraction
+
+**Implementation:**
+```python
+class CodeRAGProcessor:
+    def __init__(self):
+        self.code_detector = CodeDetector()
+        self.ast_parser = ASTParser()
+        self.code_embedder = CodeEmbedder()
+    
+    def process_code_file(self, file_path: str) -> CodeAnalysis:
+        """Process code files with AST parsing and analysis."""
+        # Detect code type
+        code_info = self.code_detector.detect_code_type(file_path)
+        
+        if code_info.is_code:
+            # Parse AST
+            ast_tree = self.ast_parser.parse_file(file_path)
+            
+            # Extract entities
+            entities = self.extract_code_entities(ast_tree)
+            
+            # Extract relationships
+            relationships = self.extract_code_relationships(ast_tree)
+            
+            # Generate embeddings
+            embeddings = self.code_embedder.embed_entities(entities)
+            
+            return CodeAnalysis(
+                language=code_info.language,
+                entities=entities,
+                relationships=relationships,
+                embeddings=embeddings,
+                ast_tree=ast_tree
+            )
+        
+        return None
+```
+
+### ✅ 4.2 Unified Search Integration
+
+**Completed Features:**
+- Unified search across code and documents
+- Code-specific search capabilities
+- Hybrid processing pipeline
+- Integration with GraphRAG knowledge graph
+
+**Implementation:**
+```python
+class UnifiedSearchEngine:
+    def __init__(self):
+        self.code_rag = CodeRAGProcessor()
+        self.graphrag = GraphRAGProcessor()
+        self.hybrid_retriever = HybridRetriever()
+    
+    def process_file(self, file_path: str, domain: str = "general"):
+        """Process files with unified pipeline."""
+        # Detect file type
+        file_info = self.detect_file_type(file_path)
+        
+        if file_info.is_code:
+            # Process with Code RAG
+            code_result = self.code_rag.process_code_file(file_path)
+            
+            # Also process with GraphRAG for unified search
+            graphrag_result = self.graphrag.process_document(file_path)
+            
+            # Integrate results
+            unified_result = self.integrate_results(code_result, graphrag_result)
+            
+            return unified_result
+        else:
+            # Process only with GraphRAG
+            return self.graphrag.process_document(file_path)
+    
+    def search_unified(self, query: str, domain: str = "general"):
+        """Search across both code and documents."""
+        # Analyze query intent
+        intent = self.analyze_query_intent(query)
+        
+        if intent.is_code_related:
+            # Search in code
+            code_results = self.code_rag.search_code(query)
+            
+            # Search in documents
+            doc_results = self.graphrag.search_documents(query)
+            
+            # Combine and rank results
+            unified_results = self.combine_results(code_results, doc_results)
+            
+            return unified_results
+        else:
+            # Search only in documents
+            return self.graphrag.search_documents(query)
+```
+
+## Phase 5: Multimodal Capabilities (Weeks 6-8)
+
+### 5.1 Image Processing & Analysis
 
 **Implementation:**
 ```python
@@ -381,7 +504,7 @@ class MultimodalProcessor:
         return self.parse_vision_response(response)
 ```
 
-### 4.2 Audio/Video Processing
+### 5.2 Audio/Video Processing
 
 **Implementation:**
 ```python
@@ -418,9 +541,9 @@ class AudioVideoProcessor:
         )
 ```
 
-## Phase 5: Advanced Agent Capabilities (Weeks 8-10)
+## Phase 6: Advanced Agent Capabilities (Weeks 8-10)
 
-### 5.1 Autonomous Research Agent
+### 6.1 Autonomous Research Agent
 
 **Implementation:**
 ```python
@@ -466,7 +589,7 @@ class ResearchAgent:
         return []
 ```
 
-### 5.2 Conversational Agent Interface
+### 6.2 Conversational Agent Interface
 
 **Implementation:**
 ```python
@@ -513,9 +636,9 @@ class ConversationalAgent:
         )
 ```
 
-## Phase 6: Performance Optimization & Scaling (Weeks 10-12)
+## Phase 7: Performance Optimization & Scaling (Weeks 10-12)
 
-### 6.1 Advanced Caching & Optimization
+### 7.1 Advanced Caching & Optimization
 
 **Implementation:**
 ```python
@@ -558,7 +681,7 @@ class PerformanceOptimizer:
         self.update_query_strategies()
 ```
 
-### 6.2 Distributed Architecture
+### 7.2 Distributed Architecture
 
 **Implementation:**
 ```python
@@ -607,17 +730,17 @@ class DistributedGraphRAG:
 4. **Performance Monitoring**: Continuous performance optimization
 
 ### Key Success Factors
-1. **Evaluation Framework**: Comprehensive testing and quality metrics
-2. **Advanced Reasoning**: Multi-hop reasoning capabilities
-3. **Real-time Updates**: Dynamic knowledge base updates
-4. **Multimodal Support**: Image, audio, and video processing
-5. **Agent Capabilities**: Autonomous research and conversational abilities
+1. **Evaluation Framework**: ✅ Comprehensive testing and quality metrics
+2. **Advanced Reasoning**: 🔄 Multi-hop reasoning capabilities (quality issues identified)
+3. **Real-time Updates**: ✅ Dynamic knowledge base updates
+4. **Code RAG Integration**: ✅ Code-specific processing and search
+5. **Reddit Integration**: ✅ Real-time information gathering
 6. **Scalability**: Distributed architecture for growth
 
 ### Risk Mitigation
-1. **Quality Assurance**: Comprehensive evaluation framework
-2. **Performance Monitoring**: Real-time performance tracking
-3. **Error Handling**: Robust error recovery and logging
+1. **Quality Assurance**: ✅ Comprehensive evaluation framework
+2. **Performance Monitoring**: ✅ Real-time performance tracking
+3. **Error Handling**: ✅ Robust error recovery and logging
 4. **Security**: Secure handling of sensitive information
 5. **Cost Management**: Efficient resource utilization
 
@@ -672,13 +795,19 @@ class AdvancedCarManualRAG:
 
 ## Conclusion
 
-This updated roadmap builds upon the solid foundation already established in the Graph RAG system. The focus shifts from basic implementation to advanced capabilities that will make the system truly state-of-the-art:
+This updated roadmap reflects the significant progress made in the Graph RAG system development:
 
-1. **Evaluation & Quality**: Comprehensive testing and evaluation framework
-2. **Advanced Reasoning**: Multi-hop reasoning and complex query processing
-3. **Real-time Updates**: Dynamic information gathering and knowledge base updates
-4. **Multimodal Support**: Image, audio, and video processing capabilities
-5. **Agent Capabilities**: Autonomous research and conversational abilities
-6. **Performance & Scaling**: Distributed architecture and optimization
+### ✅ Major Achievements Completed:
+1. **Phase 1**: Comprehensive evaluation framework and automated testing pipeline
+2. **Reddit Integration**: Full Reddit crawling service with auto-integration
+3. **Code RAG Integration**: Complete code processing and unified search
+4. **Persistent Storage**: Robust backup/restore and data management
+5. **Advanced Query Processing**: Enhanced reasoning endpoints (needs quality improvement)
 
-The modular architecture allows for incremental development and easy integration of new capabilities as the field continues to evolve. The focus on user experience and visualization makes the system accessible to non-technical users while providing the depth and accuracy needed for expert-level queries.
+### 🔄 Current Focus Areas:
+1. **Quality Improvement**: Improve advanced reasoning response quality
+2. **Performance Optimization**: Reduce query response times
+3. **Multimodal Capabilities**: Implement image and audio processing
+4. **Agent Capabilities**: Develop autonomous research and conversational agents
+
+The system has a solid foundation with comprehensive evaluation, testing, and integration capabilities. The focus now shifts to quality improvement and advanced feature development to achieve state-of-the-art performance.

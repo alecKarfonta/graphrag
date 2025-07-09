@@ -414,4 +414,41 @@ class HybridRetriever:
             documents = self.list_documents_in_vector_store()
             return [doc["name"] for doc in documents]
         except Exception:
+            return []
+    
+    def get_document_chunks(self, document_name: str) -> List[Dict[str, Any]]:
+        """Get all chunks for a specific document from the vector store."""
+        try:
+            # Find all points for this document
+            search_result = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="source_file",
+                            match=MatchValue(value=document_name)
+                        )
+                    ]
+                ),
+                limit=1000  # Adjust based on expected chunk count
+            )
+            
+            if not search_result[0]:  # No points found
+                return []
+            
+            # Convert points to chunk dictionaries
+            chunks = []
+            for point in search_result[0]:
+                chunk = {
+                    "text": point.payload.get("text", ""),
+                    "chunk_id": point.payload.get("chunk_id", ""),
+                    "source_file": point.payload.get("source_file", ""),
+                    "metadata": point.payload.get("metadata", {})
+                }
+                chunks.append(chunk)
+            
+            return chunks
+            
+        except Exception as e:
+            print(f"Error getting document chunks for {document_name}: {e}")
             return [] 

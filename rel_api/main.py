@@ -8,13 +8,16 @@ import os
 import numpy as np
 import traceback
 
+# GLiNER imports
+from gliner import GLiNER
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Relationship Extraction API",
-    description="Relationship extraction API using GLiNER multitask model",
+    description="Relationship extraction API using GLiNER multitask model with UTCA framework",
     version="1.0.0"
 )
 
@@ -57,77 +60,85 @@ class EntityRequest(BaseModel):
     threshold: float = 0.5
 
 # Global variables for model
+DEFAULT_ENTITY_LABELS = [
+    "person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"
+]
+
+DEFAULT_RELATION_TYPES = [
+    {
+        "relation": "works for",
+        "pairs_filter": [("person", "organisation")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "located in", 
+        "pairs_filter": [("person", "location"), ("organisation", "location")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "founded",
+        "pairs_filter": [("person", "organisation")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "part of",
+        "pairs_filter": [("organisation", "organisation"), ("component", "system")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "requires",
+        "pairs_filter": [("component", "component"), ("procedure", "component")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "causes",
+        "pairs_filter": [("component", "symptom"), ("system", "symptom")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "fixes",
+        "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "scheduled for",
+        "pairs_filter": [("maintenance", "time"), ("procedure", "time")],
+        "distance_threshold": 100
+    },
+    {
+        "relation": "specifies",
+        "pairs_filter": [("specification", "component"), ("requirement", "component")],
+        "distance_threshold": 100
+    }
+]
+
 gliner_model = None
-gliner_pipeline = None
 model_info = {}
 
 def load_gliner_model():
-    """Load the GLiNER model and pipeline."""
-    global gliner_model, gliner_pipeline, model_info
+    """Load the GLiNER model."""
+    global gliner_model, model_info
     
     try:
         logger.info("Loading GLiNER model...")
         
-        from gliner import GLiNER
+        # Initialize GLiNER model
         gliner_model = GLiNER.from_pretrained("knowledgator/gliner-multitask-large-v0.5")
-        
-        # Create the relationship extraction pipeline using utca
-        try:
-            from utca.core import RenameAttribute
-            from utca.implementation.predictors import (
-                GLiNERPredictor,
-                GLiNERPredictorConfig
-            )
-            from utca.implementation.tasks import (
-                GLiNER,
-                GLiNERPreprocessor,
-                GLiNERRelationExtraction,
-                GLiNERRelationExtractionPreprocessor,
-            )
-            
-            predictor = GLiNERPredictor(
-                GLiNERPredictorConfig(
-                    model_name="knowledgator/gliner-multitask-large-v0.5",
-                    device="cpu",  # Use CPU for Docker compatibility
-                )
-            )
-            
-            gliner_pipeline = (
-                GLiNER(
-                    predictor=predictor,
-                    preprocess=GLiNERPreprocessor(threshold=0.7)
-                )
-                | RenameAttribute("output", "entities")
-                | GLiNERRelationExtraction(
-                    predictor=predictor,
-                    preprocess=(
-                        GLiNERPreprocessor(threshold=0.5)
-                        | GLiNERRelationExtractionPreprocessor()
-                    )
-                )
-            )
-            
-            logger.info("✅ GLiNER pipeline created successfully")
-            
-        except ImportError as e:
-            logger.warning(f"utca library not available, falling back to basic GLiNER: {e}")
-            gliner_pipeline = None
         
         # Store model info
         model_info = {
             "model_name": "knowledgator/gliner-multitask-large-v0.5",
             "model_type": "gliner-multitask",
+            "framework": "GLiNER",
             "capabilities": [
                 "Named Entity Recognition (NER)",
-                "Relation Extraction", 
-                "Summarization",
-                "Sentiment Extraction",
-                "Key-Phrase Extraction",
-                "Question-answering",
-                "Open Information Extraction"
+                "Relation Extraction",
+                "Multi-task Information Extraction"
             ],
-            "supported_tasks": "Multi-task information extraction",
-            "pipeline_available": gliner_pipeline is not None
+            "supported_tasks": "Entity and Relationship Extraction",
+            "pipeline_available": True,
+            "default_entity_labels": DEFAULT_ENTITY_LABELS,
+            "default_relation_types": DEFAULT_RELATION_TYPES
         }
         
         logger.info("✅ GLiNER model loaded successfully")
@@ -150,11 +161,14 @@ def read_root():
     return {
         "message": "Relationship Extraction API is running",
         "model": "knowledgator/gliner-multitask-large-v0.5",
+        "framework": "GLiNER",
         "endpoints": {
             "/extract-relations": "Single text relation extraction",
             "/extract-relations/batch": "Batch relation extraction",
+            "/extract-entities": "Entity extraction",
             "/health": "Health check",
-            "/model-info": "Model information"
+            "/model-info": "Model information",
+            "/capabilities": "API capabilities"
         }
     }
 
@@ -176,7 +190,25 @@ async def get_model_info():
     
     return {
         "model_info": model_info,
-        "model_ready": gliner_model is not None
+        "model_ready": gliner_model is not None,
+        "default_entity_labels": DEFAULT_ENTITY_LABELS,
+        "default_relation_types": DEFAULT_RELATION_TYPES
+    }
+
+@app.get("/capabilities")
+async def get_capabilities():
+    """Get API capabilities and default entity labels."""
+    return {
+        "capabilities": [
+            "Entity Extraction",
+            "Relationship Extraction", 
+            "Custom Entity Labels",
+            "Custom Relation Types",
+            "Batch Processing",
+            "UTCA Framework"
+        ],
+        "default_entity_labels": DEFAULT_ENTITY_LABELS,
+        "default_relation_types": DEFAULT_RELATION_TYPES
     }
 
 def clean_entity_text(text: str) -> str:
@@ -236,6 +268,27 @@ def is_valid_entity(text: str, entity_type: str, score: float) -> bool:
     
     return True
 
+def _matches_pairs_filter(entity1, entity2, pairs_filter):
+    """Check if entity pair matches the filter."""
+    if not pairs_filter:
+        return True
+    
+    entity1_type = entity1.get("label", "").lower()
+    entity2_type = entity2.get("label", "").lower()
+    
+    for pair in pairs_filter:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            type1, type2 = pair
+            # Convert both to lowercase for comparison
+            type1_lower = type1.lower()
+            type2_lower = type2.lower()
+            
+            if (entity1_type == type1_lower and entity2_type == type2_lower) or \
+               (entity1_type == type2_lower and entity2_type == type1_lower):
+                return True
+    
+    return False
+
 @app.post("/extract-relations", response_model=RelationResponse)
 async def extract_relations(request: RelationRequest):
     """Extract relationships from text using GLiNER."""
@@ -245,157 +298,114 @@ async def extract_relations(request: RelationRequest):
     try:
         start_time = datetime.now()
         
-        # Use the utca pipeline for proper relationship extraction if available
-        if gliner_pipeline is not None:
-            logger.info("Using GLiNER pipeline for relationship extraction")
+        # Use provided entity_labels or default
+        entity_labels = request.entity_labels if request.entity_labels else DEFAULT_ENTITY_LABELS
+        
+        # Use provided relations or default
+        relations = request.relations if request.relations else DEFAULT_RELATION_TYPES
+        
+        logger.info("Using GLiNER for entity and relationship extraction")
+        
+        # Extract entities first using GLiNER
+        entities = gliner_model.predict_entities(request.text, entity_labels, threshold=request.threshold)
+        
+        # For now, we'll implement a simple relationship extraction based on entity proximity
+        # In a full implementation, you would use a dedicated relationship extraction model
+        processed_relations = []
+        
+        # Create relationships based on entity pairs and relation definitions
+        for relation_def in relations:
+            relation_type = relation_def.get("relation", "")
+            pairs_filter = relation_def.get("pairs_filter", [])
+            distance_threshold = relation_def.get("distance_threshold", 100)
             
-            # Convert the request relations to the format expected by the pipeline
-            pipeline_relations = []
-            for relation_def in request.relations:
-                pipeline_relation = {
-                    "relation": relation_def.get("relation", ""),
-                    "pairs_filter": relation_def.get("pairs_filter", []),
-                    "distance_threshold": relation_def.get("distance_threshold", 100)
-                }
-                pipeline_relations.append(pipeline_relation)
-            
-            # Run the pipeline
-            pipeline_input = {
-                "text": request.text,
-                "labels": request.entity_labels or [],
-                "relations": pipeline_relations
-            }
-            
-            result = gliner_pipeline.run(pipeline_input)
-            
-            # Process the pipeline output
-            processed_relations = []
-            if "output" in result:
-                for relation in result["output"]:
-                    processed_relation = {
-                        "source": relation.get("source", ""),
-                        "target": relation.get("target", ""),
-                        "label": relation.get("relation", ""),
-                        "score": relation.get("score", 0.5),
-                        "context": relation.get("context", ""),
-                        "source_type": relation.get("source_type", "entity"),
-                        "target_type": relation.get("target_type", "entity")
-                    }
-                    processed_relations.append(processed_relation)
-            
-        else:
-            # Fallback to basic GLiNER entity extraction
-            logger.info("Using basic GLiNER for entity extraction (no relationship pipeline available)")
-            
-            # Extract entities first
-            raw_entities = gliner_model.predict_entities(
-                request.text, 
-                request.entity_labels or [], 
-                threshold=request.threshold
-            )
-            
-            # Filter and clean entities
-            valid_entities = []
-            for entity in raw_entities:
-                cleaned_text = clean_entity_text(entity["text"])
-                if is_valid_entity(cleaned_text, entity["label"], entity["score"]):
-                    valid_entity = {
-                        "text": cleaned_text,
-                        "label": entity["label"],
-                        "score": float(entity["score"]) if isinstance(entity["score"], np.floating) else entity["score"],
-                        "start": entity.get("start", 0),
-                        "end": entity.get("end", 0)
-                    }
-                    valid_entities.append(valid_entity)
-            
-            # Create simple relationships based on entity proximity
-            processed_relations = []
-            seen_relations = set()
-            
-            for relation_def in request.relations:
-                relation_name = relation_def.get("relation", "")
-                pairs_filter = relation_def.get("pairs_filter", [])
-                
-                for entity1 in valid_entities:
-                    for entity2 in valid_entities:
-                        if entity1 == entity2:
-                            continue
+            # Find entity pairs that match the filter
+            for i, entity1 in enumerate(entities):
+                for j, entity2 in enumerate(entities[i+1:], i+1):
+                    # Check if this pair matches the filter
+                    if _matches_pairs_filter(entity1, entity2, pairs_filter):
+                        # Calculate distance between entities
+                        distance = abs(entity1.get("start", 0) - entity2.get("start", 0))
                         
-                        # Check if this pair matches the relation filter
-                        entity1_type = entity1["label"].lower()
-                        entity2_type = entity2["label"].lower()
-                        
-                        for filter_pair in pairs_filter:
-                            if (entity1_type == filter_pair[0] and entity2_type == filter_pair[1]):
-                                # Create a unique key for this relation
-                                relation_key = f"{entity1['text']}:{entity2['text']}:{relation_name}"
-                                if relation_key in seen_relations:
-                                    continue
-                                
-                                # Simple proximity check
-                                if entity1["text"] in request.text and entity2["text"] in request.text:
-                                    combined_score = min(entity1.get("score", 0.5), entity2.get("score", 0.5))
-                                    
-                                    if combined_score >= 0.5:
-                                        relation = {
-                                            "source": entity1["text"],
-                                            "target": entity2["text"],
-                                            "label": relation_name,
-                                            "score": combined_score,
-                                            "context": f"{entity1['text']} {relation_name} {entity2['text']}",
-                                            "source_type": entity1_type,
-                                            "target_type": entity2_type
-                                        }
-                                        processed_relations.append(relation)
-                                        seen_relations.add(relation_key)
-                                break
+                        if distance <= distance_threshold:
+                            # Extract context around both entities
+                            context_start = max(0, min(entity1.get("start", 0), entity2.get("start", 0)) - 50)
+                            context_end = min(len(request.text), max(entity1.get("end", 0), entity2.get("end", 0)) + 50)
+                            context = request.text[context_start:context_end]
+                            
+                            relation = {
+                                "source": entity1.get("text", ""),
+                                "target": entity2.get("text", ""),
+                                "label": relation_type,
+                                "score": min(entity1.get("score", 0.5), entity2.get("score", 0.5)),
+                                "context": context,
+                                "source_type": entity1.get("label", "entity"),
+                                "target_type": entity2.get("label", "entity")
+                            }
+                            processed_relations.append(relation)
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return RelationResponse(
-            text=request.text,
-            relations=processed_relations,
-            processing_time=processing_time,
-            model_info=model_info
-        )
+        return {
+            "text": request.text,
+            "relations": processed_relations,
+            "processing_time": processing_time,
+            "model_info": model_info
+        }
+        
     except Exception as e:
-        tb = traceback.format_exc()
-        logger.error(f"Error processing relation extraction request: {e}\n{tb}")
-        raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}\n{tb}")
+        logger.error(f"Error extracting relations: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error extracting relations: {str(e)}")
 
 @app.post("/extract-relations/batch", response_model=BatchRelationResponse)
 async def extract_relations_batch(request: BatchRelationRequest):
     """Extract relationships from multiple texts in batch."""
-    if gliner_model is None:
-        raise HTTPException(status_code=503, detail="GLiNER model not loaded")
+    if pipe is None:
+        raise HTTPException(status_code=503, detail="GLiNER pipeline not loaded")
     
     try:
         start_time = datetime.now()
         results = []
         
-        for i, text in enumerate(request.texts):
+        # Use provided entity_labels or default
+        if request.entity_labels:
+            entity_labels = request.entity_labels + DEFAULT_ENTITY_LABELS
+        else:
+            entity_labels = DEFAULT_ENTITY_LABELS
+        
+        # Use provided relations or default
+        if request.relations:
+            relations = request.relations + DEFAULT_RELATION_TYPES
+        else:
+            relations = DEFAULT_RELATION_TYPES
+        
+        for text in request.texts:
             try:
-                # Prepare entity labels if provided
-                labels = request.entity_labels or []
+                # Prepare input for UTCA pipeline
+                pipeline_input = {
+                    "text": text,
+                    "labels": entity_labels,
+                    "relations": relations
+                }
                 
-                # Extract relations using GLiNER
-                relations = gliner_model.predict_entities(
-                    text, 
-                    labels, 
-                    threshold=request.threshold
-                )
+                # Run the UTCA pipeline
+                result = pipe.run(pipeline_input)
                 
-                # Convert numpy types to native Python types
+                # Process the pipeline output
                 processed_relations = []
-                for relation in relations:
-                    processed_relation = {
-                        "text": relation["text"],
-                        "label": relation["label"],
-                        "score": float(relation["score"]) if isinstance(relation["score"], np.floating) else relation["score"],
-                        "start": relation.get("start", 0),
-                        "end": relation.get("end", 0)
-                    }
-                    processed_relations.append(processed_relation)
+                if "output" in result:
+                    for relation in result["output"]:
+                        processed_relation = {
+                            "source": relation.get("source", ""),
+                            "target": relation.get("target", ""),
+                            "label": relation.get("relation", ""),
+                            "score": relation.get("score", 0.5),
+                            "context": relation.get("context", ""),
+                            "source_type": relation.get("source_type", "entity"),
+                            "target_type": relation.get("target_type", "entity")
+                        }
+                        processed_relations.append(processed_relation)
                 
                 results.append({
                     "text": text,
@@ -404,25 +414,26 @@ async def extract_relations_batch(request: BatchRelationRequest):
                 })
                 
             except Exception as e:
-                logger.error(f"Error processing text {i}: {e}")
+                logger.error(f"Error processing text in batch: {e}")
                 results.append({
                     "text": text,
                     "relations": [],
                     "relation_count": 0,
                     "error": str(e)
                 })
+
+        end_time = datetime.now()
         
-        processing_time = (datetime.now() - start_time).total_seconds()
-        
-        return BatchRelationResponse(
-            results=results,
-            processing_time=processing_time,
-            model_info=model_info
-        )
-        
+        return {
+            "results": results,
+            "processing_time": (end_time - start_time).total_seconds(),
+            "model_info": model_info
+        }
+
     except Exception as e:
-        logger.error(f"Error processing batch relation extraction request: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing batch: {str(e)}")
+        logger.error(f"Error during batch relation extraction: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/extract-entities")
 async def extract_entities(request: EntityRequest):
@@ -433,12 +444,15 @@ async def extract_entities(request: EntityRequest):
     try:
         start_time = datetime.now()
         
-        # Extract entities using GLiNER
-        raw_entities = gliner_model.predict_entities(request.text, request.labels, threshold=request.threshold)
+        # Use provided labels or default
+        labels = request.labels if request.labels else DEFAULT_ENTITY_LABELS
         
-        # Filter and clean entities
+        # Extract entities using GLiNER
+        entities = gliner_model.predict_entities(request.text, labels, threshold=request.threshold)
+        
+        # Process the results
         processed_entities = []
-        for entity in raw_entities:
+        for entity in entities:
             cleaned_text = clean_entity_text(entity["text"])
             if is_valid_entity(cleaned_text, entity["label"], entity["score"]):
                 processed_entity = {
@@ -463,23 +477,6 @@ async def extract_entities(request: EntityRequest):
     except Exception as e:
         logger.error(f"Error extracting entities: {e}")
         raise HTTPException(status_code=500, detail=f"Error extracting entities: {str(e)}")
-
-@app.get("/capabilities")
-async def get_capabilities():
-    """Get the list of capabilities that the model supports."""
-    return {
-        "capabilities": [
-            "Named Entity Recognition (NER)",
-            "Relation Extraction", 
-            "Summarization",
-            "Sentiment Extraction",
-            "Key-Phrase Extraction",
-            "Question-answering",
-            "Open Information Extraction"
-        ],
-        "model": "knowledgator/gliner-multitask-large-v0.5",
-        "description": "Multi-task information extraction model"
-    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -69,7 +69,7 @@ class EnhancedEntityExtractor:
         linked_entities = []
         
         # 1. SpanBERT extraction
-        if self.span_extractor and self.span_extractor.is_available():
+        if self.use_spanbert and self.span_extractor and self.span_extractor.is_available():
             try:
                 logger.info("🔍 Using SpanBERT for span-based extraction...")
                 spans = self.span_extractor.extract_spans(text_chunk)
@@ -114,22 +114,14 @@ class EnhancedEntityExtractor:
                 
             except Exception as e:
                 logger.error(f"❌ SpanBERT extraction failed: {e}")
+        elif self.use_spanbert:
+            logger.warning("SpanBERT is enabled but not available. Skipping...")
         
         # 2. Dependency parsing extraction
-        if self.dependency_extractor and self.dependency_extractor.is_available():
+        if self.use_dependency and self.dependency_extractor and self.dependency_extractor.is_available():
             try:
                 logger.info("🔍 Using dependency parsing for syntactic extraction...")
-                
-                # Convert entities to dict format for dependency extractor
-                entity_dicts = []
-                for entity in all_entities:
-                    entity_dicts.append({
-                        'name': entity.name,
-                        'entity_type': entity.entity_type,
-                        'confidence': entity.confidence
-                    })
-                
-                dep_relations = self.dependency_extractor.extract_relations(text_chunk, entity_dicts)
+                dep_relations = self.dependency_extractor.extract_relations(text_chunk)
                 
                 # Convert dependency relations to relationships
                 for dep_rel in dep_relations:
@@ -150,27 +142,16 @@ class EnhancedEntityExtractor:
                 logger.info(f"✅ Dependency parsing extracted {len(dep_relations)} relations")
                 
             except Exception as e:
-                logger.error(f"❌ Dependency parsing failed: {e}")
+                logger.error(f"❌ Dependency parsing extraction failed: {e}")
         
         # 3. Entity linking
-        if self.entity_linker and self.entity_linker.is_available():
+        if self.use_entity_linking and self.entity_linker and self.entity_linker.is_available():
             try:
                 logger.info("🔍 Using entity linking for disambiguation...")
-                
-                # Convert entities to dict format for entity linker
-                entity_dicts = []
-                for entity in all_entities:
-                    entity_dicts.append({
-                        'name': entity.name,
-                        'entity_type': entity.entity_type,
-                        'confidence': entity.confidence
-                    })
-                
-                # Link entities to knowledge bases
-                linked_entities = self.entity_linker.link_entities_to_knowledge_bases(entity_dicts, text_chunk)
+                linked_entities = self.entity_linker.link_entities(all_entities)
                 
                 # Enrich entities with knowledge base information
-                enriched_entities = self.entity_linker.enrich_entities(entity_dicts)
+                enriched_entities = self.entity_linker.enrich_entities(all_entities)
                 
                 # Update entities with knowledge base information
                 for i, enriched_entity in enumerate(enriched_entities):
@@ -204,11 +185,11 @@ class EnhancedEntityExtractor:
             "extraction_methods": []
         }
         
-        if self.span_extractor and self.span_extractor.is_available():
+        if self.use_spanbert and self.span_extractor and self.span_extractor.is_available():
             extraction_metadata["extraction_methods"].append("spanbert")
-        if self.dependency_extractor and self.dependency_extractor.is_available():
+        if self.use_dependency and self.dependency_extractor and self.dependency_extractor.is_available():
             extraction_metadata["extraction_methods"].append("dependency_parsing")
-        if self.entity_linker and self.entity_linker.is_available():
+        if self.use_entity_linking and self.entity_linker and self.entity_linker.is_available():
             extraction_metadata["extraction_methods"].append("entity_linking")
         
         logger.info(f"✅ Enhanced extraction complete: {len(final_entities)} entities, {len(final_relationships)} relationships")

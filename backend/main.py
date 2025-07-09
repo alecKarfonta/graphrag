@@ -17,7 +17,7 @@ from graphrag_evaluator import GraphRAGEvaluator
 from automated_test_suite import AutomatedTestSuite
 from datetime import datetime
 from pydantic import BaseModel
-from ner_client import get_ner_client, extract_entities_from_text, extract_entities_from_chunks, is_ner_available
+# Local NER removed - using GLiNER instead
 from rel_extractor import get_relationship_extractor
 from enhanced_query_processor import EnhancedQueryProcessor
 from entity_linker import EntityLinker
@@ -441,10 +441,24 @@ async def ingest_documents(
                 successful_extractions = 0
                 failed_extractions = 0
                 
-                for i in range(0, len(chunks), batch_size):
-                    batch = chunks[i:i + batch_size]
+                # Convert chunks to dictionary format for entity extraction
+                chunk_dicts = []
+                for chunk in chunks:
+                    chunk_dict = {
+                        "text": chunk.text,
+                        "chunk_id": chunk.chunk_id,
+                        "source_file": chunk.source_file,
+                        "page_number": chunk.page_number,
+                        "section_header": chunk.section_header,
+                        "chunk_index": chunk.chunk_index,
+                        "metadata": chunk.metadata
+                    }
+                    chunk_dicts.append(chunk_dict)
+                
+                for i in range(0, len(chunk_dicts), batch_size):
+                    batch = chunk_dicts[i:i + batch_size]
                     batch_num = (i // batch_size) + 1
-                    total_batches = (len(chunks) + batch_size - 1) // batch_size
+                    total_batches = (len(chunk_dicts) + batch_size - 1) // batch_size
                     
                     print(f"📦 Processing batch {batch_num}/{total_batches} ({len(batch)} chunks)...")
                     
@@ -461,7 +475,7 @@ async def ingest_documents(
                             signal.alarm(30)
                             
                             extraction_result = entity_extractor.extract_entities_and_relations(
-                                chunk.text, domain=domain
+                                chunk["text"], domain=domain
                             )
                             
                             # Cancel timeout
@@ -599,6 +613,132 @@ async def export_knowledge_graph(format: str = "json", domain: str | None = None
 async def add_to_vector_store_legacy(files: List[UploadFile] = File(...)):
     """Legacy endpoint for adding documents to vector store only."""
     return await ingest_documents(files=files, build_knowledge_graph=False)
+
+@app.post("/rebuild-knowledge-graph")
+async def rebuild_knowledge_graph(domain: str = "general"):
+    """Rebuild the knowledge graph from existing documents in the vector store."""
+    try:
+        if not entity_extractor or not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Entity extractor or knowledge graph builder not available")
+        
+        # Clear existing knowledge graph
+        knowledge_graph_builder.clear_graph()
+        
+        # Get all documents from vector store
+        documents = hybrid_retriever.list_documents()
+        
+        if not documents:
+            return {
+                "message": "No documents found in vector store",
+                "documents_processed": 0,
+                "entities_extracted": 0,
+                "relationships_extracted": 0
+            }
+        
+        print(f"🔄 Rebuilding knowledge graph from {len(documents)} documents...")
+        
+        total_entities = 0
+        total_relationships = 0
+        processed_documents = 0
+        
+        for doc_name in documents:
+            try:
+                print(f"📄 Processing document: {doc_name}")
+                
+                # Get document chunks from vector store
+                chunks = hybrid_retriever.get_document_chunks(doc_name)
+                
+                if not chunks:
+                    print(f"⚠️  No chunks found for document: {doc_name}")
+                    continue
+                
+                # Extract entities and relationships from chunks
+                all_entities = []
+                all_relationships = []
+                
+                # Process chunks in batches
+                batch_size = 5
+                successful_extractions = 0
+                failed_extractions = 0
+                
+                for i in range(0, len(chunks), batch_size):
+                    batch = chunks[i:i + batch_size]
+                    batch_num = (i // batch_size) + 1
+                    total_batches = (len(chunks) + batch_size - 1) // batch_size
+                    
+                    print(f"📦 Processing batch {batch_num}/{total_batches} ({len(batch)} chunks)...")
+                    
+                    for chunk_idx, chunk in enumerate(batch):
+                        try:
+                            # Add timeout handling for individual chunk processing
+                            import signal
+                            
+                            def timeout_handler(signum, frame):
+                                raise TimeoutError("Entity extraction timeout")
+                            
+                            # Set timeout for 30 seconds per chunk
+                            signal.signal(signal.SIGALRM, timeout_handler)
+                            signal.alarm(30)
+                            
+                            extraction_result = entity_extractor.extract_entities_and_relations(
+                                chunk["text"], domain=domain
+                            )
+                            
+                            # Cancel timeout
+                            signal.alarm(0)
+                            
+                            # Validate entities and relationships
+                            validated_entities = entity_extractor.validate_entities(extraction_result.entities)
+                            validated_relationships = entity_extractor.validate_relationships(
+                                extraction_result.relationships, validated_entities
+                            )
+                            
+                            all_entities.extend(validated_entities)
+                            all_relationships.extend(validated_relationships)
+                            successful_extractions += 1
+                            
+                            if validated_entities or validated_relationships:
+                                print(f"  ✅ Chunk {i + chunk_idx + 1}: {len(validated_entities)} entities, {len(validated_relationships)} relationships")
+                            
+                        except (TimeoutError, Exception) as e:
+                            signal.alarm(0)  # Cancel timeout
+                            failed_extractions += 1
+                            print(f"  ⚠️  Chunk {i + chunk_idx + 1} failed: {str(e)[:100]}...")
+                            continue
+                
+                print(f"🔍 Completed extraction for {doc_name}: {successful_extractions} successful, {failed_extractions} failed")
+                print(f"🔍 Total extracted: {len(all_entities)} entities and {len(all_relationships)} relationships")
+                
+                # Build knowledge graph for this document
+                if all_entities:
+                    print(f"🕸️  Building knowledge graph for {doc_name} with {len(all_entities)} entities and {len(all_relationships)} relationships")
+                    knowledge_graph_builder.build_graph(all_entities, all_relationships, domain=domain)
+                    total_entities += len(all_entities)
+                    total_relationships += len(all_relationships)
+                    processed_documents += 1
+                else:
+                    print(f"⚠️  No entities extracted from {doc_name}, skipping knowledge graph building")
+                
+            except Exception as e:
+                print(f"❌ Error processing document {doc_name}: {str(e)}")
+                continue
+        
+        print(f"✅ Knowledge graph rebuild completed!")
+        print(f"📊 Processed {processed_documents}/{len(documents)} documents")
+        print(f"📊 Total entities: {total_entities}")
+        print(f"📊 Total relationships: {total_relationships}")
+        
+        return {
+            "message": "Knowledge graph rebuilt successfully",
+            "documents_processed": processed_documents,
+            "total_documents": len(documents),
+            "entities_extracted": total_entities,
+            "relationships_extracted": total_relationships,
+            "domain": domain
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error rebuilding knowledge graph: {str(e)}")
 
 @app.delete("/clear-all")
 async def clear_all_data():
@@ -855,37 +995,47 @@ async def get_test_reports():
 
 @app.get("/ner/status")
 async def get_ner_status():
-    """Check if NER API is available."""
+    """Check if GLiNER entity extraction is available."""
     try:
-        available = is_ner_available()
-        client = get_ner_client()
+        rel_extractor = get_relationship_extractor()
+        available = rel_extractor.is_available()
         
-        if client:
-            model_info = client.get_model_info()
+        if available:
+            model_info = rel_extractor.get_model_info()
         else:
             model_info = None
         
         return {
             "ner_available": available,
             "model_info": model_info,
+            "extraction_method": "gliner",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error checking NER status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error checking GLiNER status: {str(e)}")
 
 @app.post("/ner/extract")
 async def extract_entities_from_text_endpoint(text: str = Body(...)):
-    """Extract entities from text using the NER API."""
+    """Extract entities from text using GLiNER."""
     try:
-        if not is_ner_available():
-            raise HTTPException(status_code=503, detail="NER API is not available")
+        rel_extractor = get_relationship_extractor()
+        if not rel_extractor.is_available():
+            raise HTTPException(status_code=503, detail="GLiNER is not available")
         
-        entities = extract_entities_from_text(text)
+        # Use GLiNER for entity extraction
+        result = rel_extractor.extract_entities(
+            text=text,
+            labels=["person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"],
+            threshold=0.5
+        )
+        
+        entities = result.get("entities", [])
         
         return {
             "text": text,
             "entities": entities,
             "entity_count": len(entities),
+            "extraction_method": "gliner",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -893,15 +1043,20 @@ async def extract_entities_from_text_endpoint(text: str = Body(...)):
 
 @app.post("/ner/extract-batch")
 async def extract_entities_batch_endpoint(texts: List[str] = Body(...)):
-    """Extract entities from multiple texts using the NER API."""
+    """Extract entities from multiple texts using GLiNER."""
     try:
-        if not is_ner_available():
-            raise HTTPException(status_code=503, detail="NER API is not available")
-        
-        entity_lists = extract_entities_from_chunks(texts)
+        rel_extractor = get_relationship_extractor()
+        if not rel_extractor.is_available():
+            raise HTTPException(status_code=503, detail="GLiNER is not available")
         
         results = []
-        for i, (text, entities) in enumerate(zip(texts, entity_lists)):
+        for text in texts:
+            result = rel_extractor.extract_entities(
+                text=text,
+                labels=["person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"],
+                threshold=0.5
+            )
+            entities = result.get("entities", [])
             results.append({
                 "text": text,
                 "entities": entities,
@@ -911,6 +1066,7 @@ async def extract_entities_batch_endpoint(texts: List[str] = Body(...)):
         return {
             "results": results,
             "total_texts": len(texts),
+            "extraction_method": "gliner",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -949,17 +1105,23 @@ async def process_document_with_ner(
                 "metadata": chunk.metadata
             })
         
-        # Extract entities if requested and NER is available
-        if extract_entities and is_ner_available():
+        # Extract entities if requested and GLiNER is available
+        rel_extractor = get_relationship_extractor()
+        if extract_entities and rel_extractor.is_available():
             chunk_texts = [chunk["text"] for chunk in chunk_data]
-            entity_lists = extract_entities_from_chunks(chunk_texts)
             
-            # Add entities to chunk data
-            for i, (chunk, entities) in enumerate(zip(chunk_data, entity_lists)):
+            # Extract entities for each chunk using GLiNER
+            for i, chunk in enumerate(chunk_data):
+                result = rel_extractor.extract_entities(
+                    text=chunk["text"],
+                    labels=["person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"],
+                    threshold=0.5
+                )
+                entities = result.get("entities", [])
                 chunk["entities"] = entities
                 chunk["entity_count"] = len(entities)
         else:
-            # Add empty entities if NER is not available
+            # Add empty entities if GLiNER is not available
             for chunk in chunk_data:
                 chunk["entities"] = []
                 chunk["entity_count"] = 0
@@ -972,8 +1134,8 @@ async def process_document_with_ner(
             "chunks": chunk_data,
             "total_chunks": len(chunk_data),
             "use_semantic_chunking": use_semantic_chunking,
-            "ner_available": is_ner_available(),
-            "entities_extracted": extract_entities and is_ner_available()
+            "ner_available": rel_extractor.is_available(),
+            "entities_extracted": extract_entities and rel_extractor.is_available()
         }
         
     except Exception as e:
@@ -1119,33 +1281,77 @@ async def enhanced_query_processing(request: AdvancedSearchRequest):
         # Process the query with enhanced reasoning
         result = enhanced_query_processor.process_query(request.query, entities, relationships)
         
+        # Generate comprehensive answer
+        answer = ""
+        if hasattr(result, 'answer') and result.answer:
+            answer = result.answer
+        else:
+            # Generate answer from reasoning paths
+            if hasattr(result, 'reasoning_paths') and result.reasoning_paths:
+                context_parts = []
+                for path in result.reasoning_paths:
+                    if hasattr(path, 'reasoning_chain') and path.reasoning_chain:
+                        context_parts.append(f"Reasoning: {' → '.join(path.reasoning_chain)}")
+                    if hasattr(path, 'evidence') and path.evidence:
+                        context_parts.append(f"Evidence: {'; '.join(path.evidence)}")
+                
+                context = "\n\n".join(context_parts)
+                
+                # Generate answer using LLM
+                if entity_extractor:
+                    rag_prompt = f"""You are an expert assistant that provides comprehensive answers based on enhanced reasoning.
+
+Query: {request.query}
+
+Enhanced Reasoning Analysis:
+{context}
+
+Please provide a comprehensive answer that:
+1. Directly addresses the query
+2. Incorporates the enhanced reasoning analysis
+3. Explains the relationships and connections found
+4. Provides clear, factual information
+5. Uses the evidence and reasoning chains to support the answer
+
+Answer:"""
+                    
+                    try:
+                        response = entity_extractor.llm.invoke(rag_prompt)
+                        answer = response.content if hasattr(response, 'content') else str(response)
+                    except Exception as llm_error:
+                        logger.error(f"LLM generation error: {llm_error}")
+                        answer = f"Based on the enhanced reasoning analysis, I found {len(result.reasoning_paths)} relevant reasoning paths. Please try rephrasing your query for more specific results."
+            else:
+                answer = "No enhanced reasoning results found for this query. Please try rephrasing or providing more specific information."
+        
         return {
-            "query": result.query,
-            "results": result.results,
+            "query": request.query,
+            "answer": answer,
+            "results": result.results if hasattr(result, 'results') else [],
             "reasoning_paths": [
                 {
-                    "source": path.source,
-                    "target": path.target,
-                    "path": path.path,
-                    "relationships": path.relationships,
-                    "confidence": path.confidence,
-                    "length": path.path_length
+                    "source": getattr(path, 'source', 'Unknown'),
+                    "target": getattr(path, 'target', 'Unknown'),
+                    "path": getattr(path, 'path', []),
+                    "relationships": getattr(path, 'relationships', []),
+                    "confidence": getattr(path, 'confidence', 0.0),
+                    "length": getattr(path, 'path_length', 0)
                 }
-                for path in result.reasoning_paths
+                for path in (result.reasoning_paths if hasattr(result, 'reasoning_paths') else [])
             ],
             "inferred_relationships": [
                 {
-                    "source": rel.source,
-                    "target": rel.target,
-                    "relation": rel.relation_type,
-                    "confidence": rel.confidence,
-                    "context": rel.context
+                    "source": getattr(rel, 'source', 'Unknown'),
+                    "target": getattr(rel, 'target', 'Unknown'),
+                    "relation": getattr(rel, 'relation_type', 'Unknown'),
+                    "confidence": getattr(rel, 'confidence', 0.0),
+                    "context": getattr(rel, 'context', '')
                 }
-                for rel in result.inferred_relationships
+                for rel in (result.inferred_relationships if hasattr(result, 'inferred_relationships') else [])
             ],
-            "entity_clusters": result.entity_clusters,
-            "explanation": result.explanation,
-            "confidence": result.confidence,
+            "entity_clusters": getattr(result, 'entity_clusters', []),
+            "explanation": getattr(result, 'explanation', ''),
+            "confidence": getattr(result, 'confidence', 0.0),
             "timestamp": datetime.now().isoformat()
         }
         
@@ -1418,7 +1624,7 @@ async def analyze_query_intent(query: str):
 async def advanced_reasoning(query: str):
     """Perform advanced reasoning on a query."""
     try:
-        # Extract entities from query
+        # Extract entities from query using local NER model
         extraction_result = entity_extractor.extract_entities_and_relations(query)
         entities = [entity.name for entity in extraction_result.entities]
         
@@ -1428,8 +1634,41 @@ async def advanced_reasoning(query: str):
         # Generate explanation
         explanation = advanced_reasoning_engine.generate_reasoning_explanation(reasoning_paths)
         
+        # Generate comprehensive answer without LLM dependency
+        answer = ""
+        if reasoning_paths:
+            # Build answer from reasoning paths
+            answer_parts = []
+            
+            # Add introduction
+            answer_parts.append(f"Based on the analysis of your query '{query}', I found {len(reasoning_paths)} relevant reasoning paths.")
+            
+            # Add reasoning details
+            for i, path in enumerate(reasoning_paths, 1):
+                path_type = path.path_type.replace('_', ' ').title()
+                answer_parts.append(f"\n{i}. {path_type} Analysis:")
+                
+                if path.reasoning_chain:
+                    answer_parts.append(f"   Reasoning chain: {' → '.join(path.reasoning_chain)}")
+                
+                if path.evidence:
+                    answer_parts.append(f"   Evidence: {'; '.join(path.evidence)}")
+                
+                answer_parts.append(f"   Confidence: {path.confidence:.2f}")
+            
+            # Add conclusion
+            if reasoning_paths:
+                avg_confidence = sum(path.confidence for path in reasoning_paths) / len(reasoning_paths)
+                answer_parts.append(f"\nOverall confidence in this analysis: {avg_confidence:.2f}")
+                answer_parts.append(f"Total reasoning paths found: {len(reasoning_paths)}")
+            
+            answer = "\n".join(answer_parts)
+        else:
+            answer = f"No relevant reasoning paths found for the query '{query}'. Please try rephrasing or providing more specific information about what you want to analyze."
+        
         return {
             "query": query,
+            "answer": answer,
             "entities": entities,
             "reasoning_paths": [
                 {
@@ -1443,11 +1682,12 @@ async def advanced_reasoning(query: str):
                 for path in reasoning_paths
             ],
             "explanation": explanation,
-            "total_paths": len(reasoning_paths)
+            "total_paths": len(reasoning_paths),
+            "confidence": sum(path.confidence for path in reasoning_paths) / len(reasoning_paths) if reasoning_paths else 0.0
         }
     except Exception as e:
         logger.error(f"Error in advanced reasoning: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "answer": "An error occurred while processing your query."}
 
 @app.post("/api/enhanced-query")
 async def enhanced_query(query: str, context: Optional[Dict] = None):
@@ -1504,15 +1744,47 @@ async def analyze_query_complexity(query: str):
 async def causal_reasoning(query: str):
     """Perform causal reasoning to find cause-effect relationships."""
     try:
-        # Extract entities from query
+        # Extract entities from query using local NER model
         extraction_result = entity_extractor.extract_entities_and_relations(query)
         entities = [entity.name for entity in extraction_result.entities]
         
         # Execute causal reasoning
         reasoning_paths = advanced_reasoning_engine.causal_reasoning(query, entities)
         
+        # Generate comprehensive answer without LLM dependency
+        answer = ""
+        if reasoning_paths:
+            # Build answer from causal chains
+            answer_parts = []
+            
+            # Add introduction
+            answer_parts.append(f"Based on the causal analysis of your query '{query}', I found {len(reasoning_paths)} causal relationships.")
+            
+            # Add causal details
+            for i, path in enumerate(reasoning_paths, 1):
+                answer_parts.append(f"\n{i}. Causal Chain Analysis:")
+                
+                if path.reasoning_chain:
+                    answer_parts.append(f"   Causal chain: {' → '.join(path.reasoning_chain)}")
+                
+                if path.evidence:
+                    answer_parts.append(f"   Evidence: {'; '.join(path.evidence)}")
+                
+                answer_parts.append(f"   Confidence: {path.confidence:.2f}")
+            
+            # Add conclusion
+            if reasoning_paths:
+                avg_confidence = sum(path.confidence for path in reasoning_paths) / len(reasoning_paths)
+                answer_parts.append(f"\nOverall confidence in causal analysis: {avg_confidence:.2f}")
+                answer_parts.append(f"Total causal chains found: {len(reasoning_paths)}")
+            
+            answer = "\n".join(answer_parts)
+        else:
+            answer = f"No causal relationships found for the query '{query}'. Please try rephrasing or providing more specific information about cause-effect relationships."
+        
         return {
             "query": query,
+            "answer": answer,
             "entities": entities,
             "causal_chains": [
                 {
@@ -1525,25 +1797,58 @@ async def causal_reasoning(query: str):
                 }
                 for path in reasoning_paths
             ],
-            "total_chains": len(reasoning_paths)
+            "total_chains": len(reasoning_paths),
+            "confidence": sum(path.confidence for path in reasoning_paths) / len(reasoning_paths) if reasoning_paths else 0.0
         }
     except Exception as e:
         logger.error(f"Error in causal reasoning: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "answer": "An error occurred while processing your query."}
 
 @app.post("/api/comparative-reasoning")
 async def comparative_reasoning(query: str):
     """Perform comparative reasoning between entities."""
     try:
-        # Extract entities from query
+        # Extract entities from query using local NER model
         extraction_result = entity_extractor.extract_entities_and_relations(query)
         entities = [entity.name for entity in extraction_result.entities]
         
         # Execute comparative reasoning
         reasoning_paths = advanced_reasoning_engine.comparative_reasoning(query, entities)
         
+        # Generate comprehensive answer without LLM dependency
+        answer = ""
+        if reasoning_paths:
+            # Build answer from comparisons
+            answer_parts = []
+            
+            # Add introduction
+            answer_parts.append(f"Based on the comparative analysis of your query '{query}', I found {len(reasoning_paths)} comparisons.")
+            
+            # Add comparison details
+            for i, path in enumerate(reasoning_paths, 1):
+                answer_parts.append(f"\n{i}. Comparative Analysis:")
+                
+                if path.reasoning_chain:
+                    answer_parts.append(f"   Comparison: {' → '.join(path.reasoning_chain)}")
+                
+                if path.evidence:
+                    answer_parts.append(f"   Evidence: {'; '.join(path.evidence)}")
+                
+                answer_parts.append(f"   Confidence: {path.confidence:.2f}")
+            
+            # Add conclusion
+            if reasoning_paths:
+                avg_confidence = sum(path.confidence for path in reasoning_paths) / len(reasoning_paths)
+                answer_parts.append(f"\nOverall confidence in comparative analysis: {avg_confidence:.2f}")
+                answer_parts.append(f"Total comparisons found: {len(reasoning_paths)}")
+            
+            answer = "\n".join(answer_parts)
+        else:
+            answer = f"No comparative analysis found for the query '{query}'. Please try rephrasing or providing more specific information about what you want to compare."
+        
         return {
             "query": query,
+            "answer": answer,
             "entities": entities,
             "comparisons": [
                 {
@@ -1556,25 +1861,58 @@ async def comparative_reasoning(query: str):
                 }
                 for path in reasoning_paths
             ],
-            "total_comparisons": len(reasoning_paths)
+            "total_comparisons": len(reasoning_paths),
+            "confidence": sum(path.confidence for path in reasoning_paths) / len(reasoning_paths) if reasoning_paths else 0.0
         }
     except Exception as e:
         logger.error(f"Error in comparative reasoning: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "answer": "An error occurred while processing your query."}
 
 @app.post("/api/multi-hop-reasoning")
-async def multi_hop_reasoning(query: str, max_hops: int = 3):
+async def api_multi_hop_reasoning(query: str, max_hops: int = 3):
     """Perform multi-hop reasoning across the knowledge graph."""
     try:
-        # Extract entities from query
+        # Extract entities from query using local NER model
         extraction_result = entity_extractor.extract_entities_and_relations(query)
         entities = [entity.name for entity in extraction_result.entities]
         
         # Execute multi-hop reasoning
         reasoning_paths = advanced_reasoning_engine.multi_hop_reasoning(query, entities)
         
+        # Generate comprehensive answer without LLM dependency
+        answer = ""
+        if reasoning_paths:
+            # Build answer from multi-hop paths
+            answer_parts = []
+            
+            # Add introduction
+            answer_parts.append(f"Based on the multi-hop analysis of your query '{query}', I found {len(reasoning_paths)} connection paths.")
+            
+            # Add multi-hop details
+            for i, path in enumerate(reasoning_paths, 1):
+                answer_parts.append(f"\n{i}. Multi-hop Path Analysis:")
+                
+                if path.reasoning_chain:
+                    answer_parts.append(f"   Connection path: {' → '.join(path.reasoning_chain)}")
+                
+                if path.evidence:
+                    answer_parts.append(f"   Evidence: {'; '.join(path.evidence)}")
+                
+                answer_parts.append(f"   Confidence: {path.confidence:.2f}")
+            
+            # Add conclusion
+            if reasoning_paths:
+                avg_confidence = sum(path.confidence for path in reasoning_paths) / len(reasoning_paths)
+                answer_parts.append(f"\nOverall confidence in multi-hop analysis: {avg_confidence:.2f}")
+                answer_parts.append(f"Total connection paths found: {len(reasoning_paths)}")
+            
+            answer = "\n".join(answer_parts)
+        else:
+            answer = f"No multi-hop connections found for the query '{query}'. Please try rephrasing or providing more specific information about the relationships you want to explore."
+        
         return {
             "query": query,
+            "answer": answer,
             "entities": entities,
             "max_hops": max_hops,
             "reasoning_paths": [
@@ -1588,11 +1926,12 @@ async def multi_hop_reasoning(query: str, max_hops: int = 3):
                 }
                 for path in reasoning_paths
             ],
-            "total_paths": len(reasoning_paths)
+            "total_paths": len(reasoning_paths),
+            "confidence": sum(path.confidence for path in reasoning_paths) / len(reasoning_paths) if reasoning_paths else 0.0
         }
     except Exception as e:
         logger.error(f"Error in multi-hop reasoning: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "answer": "An error occurred while processing your query."}
 
 @app.post("/extract-entities-relations-enhanced")
 async def extract_entities_relations_enhanced(
@@ -1701,7 +2040,7 @@ async def test_enhanced_extraction(
             "message": "Enhanced extraction test completed",
             "entities_found": len(result.entities),
             "relationships_found": len(result.relationships),
-            "extraction_methods_used": result.extraction_metadata.get("extraction_methods", []),
+            "extraction_methods_used": (result.extraction_metadata or {}).get("extraction_methods", []),
             "sample_entities": [
                 {
                     "name": entity.name,

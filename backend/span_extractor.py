@@ -34,7 +34,7 @@ class SpanRelation:
 class SpanBERTExtractor:
     """SpanBERT-based entity and relationship extractor."""
     
-    def __init__(self, model_name: str = "microsoft/spanbert-base-cased", device: str = "cpu"):
+    def __init__(self, model_name: str = "mrm8488/spanbert-finetuned-squadv2", device: str = "cpu"):
         """
         Initialize the SpanBERT extractor.
         

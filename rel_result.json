@@ -1,0 +1,11 @@
+{
+  "text": "John Smith founded Acme Corp in New York in 2020. Acme Corp acquired Beta Inc. in 2022.",
+  "domain": "general",
+  "entities": [],
+  "relationships": [],
+  "claims": [],
+  "entity_count": 0,
+  "relationship_count": 0,
+  "extraction_method": "integrated_gliner",
+  "timestamp": "2025-07-08T23:12:55.868394"
+}
