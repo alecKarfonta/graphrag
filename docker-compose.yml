@@ -5,7 +5,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     healthcheck:
@@ -29,9 +29,6 @@ services:
       - qdrant
     volumes:
       - ./backend:/app
-      - ./ingest_data.py:/app/ingest_data.py
-      - ./test_code_rag.py:/app/test_code_rag.py
-      - ./code_rag:/app/code_rag
       - api_data:/app/data
       - api_logs:/app/logs
       - api_cache:/app/.cache

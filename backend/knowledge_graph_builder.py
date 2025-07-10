@@ -77,7 +77,7 @@ class KnowledgeGraphBuilder:
         # In-memory graph for analysis
         self.graph = nx.Graph()
         
-    def add_entities_and_relationships(self, entities: List[Dict], relationships: List[Dict], domain: str = "general") -> None:
+    def add_entities_and_relationships(self, entities: List[Any], relationships: List[Dict], domain: str = "general") -> None:
         """Add entities and relationships to the knowledge graph with domain tracking."""
         
         # Add to Neo4j
@@ -91,10 +91,10 @@ class KnowledgeGraphBuilder:
                                      e.occurrence = 1, e.domain = $domain
                         ON MATCH SET e.occurrence = e.occurrence + 1, e.domain = $domain
                         """, 
-                        id=entity["name"],
-                        name=entity["name"],
-                        type=entity["type"],
-                        description=entity.get("description", ""),
+                        id=entity.name,
+                        name=entity.name,
+                        type=entity.entity_type,
+                        description=entity.description,
                         domain=domain
                     )
                 
@@ -116,7 +116,7 @@ class KnowledgeGraphBuilder:
         
         # Add to NetworkX for analysis with occurrence tracking and domain
         for entity in entities:
-            entity_name = entity["name"]
+            entity_name = entity.name
             if entity_name in self.graph:
                 # Increment occurrence count
                 current_occurrence = self.graph.nodes[entity_name].get("occurrence", 1)
@@ -126,8 +126,8 @@ class KnowledgeGraphBuilder:
             else:
                 # Add new node with occurrence count and domain
                 self.graph.add_node(entity_name, 
-                                  type=entity["type"],
-                                  description=entity.get("description", ""),
+                                  type=entity.entity_type,
+                                  description=entity.description,
                                   occurrence=1,
                                   domain=domain)
         

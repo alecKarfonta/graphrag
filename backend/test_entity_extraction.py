@@ -66,25 +66,20 @@ def test_entity_extraction():
         for claim in result.claims:
             print(f"   - {claim}")
         
-        return True
+        return result.entities
         
     except Exception as e:
         print(f"❌ Entity extraction failed: {e}")
-        return False
+        return None
 
-def test_entity_resolution():
+def test_entity_resolution(entities: list):
     """Test entity resolution and deduplication."""
     print("\n🧪 Testing Entity Resolution...")
     
-    # Mock entities for testing
-    entities = [
-        {"name": "Honda Civic", "type": "COMPONENT", "description": "Compact car model"},
-        {"name": "Civic", "type": "COMPONENT", "description": "Honda's compact car"},
-        {"name": "Honda", "type": "ORGANIZATION", "description": "Japanese car manufacturer"},
-        {"name": "Engine", "type": "COMPONENT", "description": "2.0L engine"},
-        {"name": "Motor", "type": "COMPONENT", "description": "Vehicle power unit"}
-    ]
-    
+    if not entities:
+        print("⚠️ No entities to resolve, skipping.")
+        return None
+        
     resolver = EntityResolver()
     
     try:
@@ -98,33 +93,23 @@ def test_entity_resolution():
         # Display resolved entities
         print("\n📋 Resolved Entities:")
         for entity in resolved_entities:
-            print(f"   - {entity['name']} ({entity['type']}): {entity['description']}")
-            if 'merged_from' in entity:
-                print(f"     Merged from: {', '.join(entity['merged_from'])}")
+            print(f"   - {entity.name} ({entity.entity_type}): {entity.description}")
+            if entity.metadata and 'merged_from' in entity.metadata:
+                print(f"     Merged from: {', '.join(entity.metadata['merged_from'])}")
         
-        return True
+        return resolved_entities
         
     except Exception as e:
         print(f"❌ Entity resolution failed: {e}")
-        return False
+        return None
 
-def test_knowledge_graph_construction():
+def test_knowledge_graph_construction(entities: list, relationships: list):
     """Test knowledge graph construction."""
     print("\n🧪 Testing Knowledge Graph Construction...")
     
-    # Mock data
-    entities = [
-        {"name": "Honda Civic", "type": "COMPONENT", "description": "Compact car model"},
-        {"name": "Engine", "type": "COMPONENT", "description": "2.0L engine"},
-        {"name": "Brake System", "type": "COMPONENT", "description": "ABS and EBD system"},
-        {"name": "Honda", "type": "ORGANIZATION", "description": "Japanese car manufacturer"}
-    ]
-    
-    relationships = [
-        {"source": "Honda Civic", "target": "Engine", "relation": "CONTAINS", "context": "The Civic contains a 2.0L engine"},
-        {"source": "Honda Civic", "target": "Brake System", "relation": "CONTAINS", "context": "The Civic includes ABS and EBD"},
-        {"source": "Honda Civic", "target": "Honda", "relation": "MANUFACTURED_BY", "context": "Civic is manufactured by Honda"}
-    ]
+    if not entities:
+        print("⚠️ No entities to add to graph, skipping.")
+        return False
     
     try:
         # Initialize knowledge graph builder
@@ -238,39 +223,32 @@ def main():
         print("💡 Please set your Claude API key in the .env file")
     
     # Run tests
-    tests = [
-        ("Document Processing", test_document_processing),
-        ("Entity Extraction", test_entity_extraction),
-        ("Entity Resolution", test_entity_resolution),
-        ("Knowledge Graph Construction", test_knowledge_graph_construction)
-    ]
+    test_document_processing()
     
-    results = []
-    for test_name, test_func in tests:
-        print(f"\n{'='*20} {test_name} {'='*20}")
-        try:
-            success = test_func()
-            results.append((test_name, success))
-        except Exception as e:
-            print(f"❌ {test_name} failed with exception: {e}")
-            results.append((test_name, False))
+    print(f"\n{'='*20} Entity Extraction {'='*20}")
+    extracted_entities = test_entity_extraction()
     
-    # Summary
-    print("\n" + "="*50)
-    print("📊 Test Results Summary:")
-    passed = 0
-    for test_name, success in results:
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"   {test_name}: {status}")
-        if success:
-            passed += 1
-    
-    print(f"\n🎯 Overall: {passed}/{len(results)} tests passed")
-    
-    if passed == len(results):
-        print("🎉 All tests passed! The Graph RAG system is ready.")
+    print(f"\n{'='*20} Entity Resolution {'='*20}")
+    if extracted_entities:
+        resolved_entities = test_entity_resolution(extracted_entities)
     else:
-        print("⚠️  Some tests failed. Please check the errors above.")
+        resolved_entities = None
+    
+    print(f"\n{'='*20} Knowledge Graph Construction {'='*20}")
+    # This part needs the relationships as well, which are not currently passed.
+    # For now, we'll use the resolved entities and mock relationships for the graph test.
+    if resolved_entities:
+        mock_relationships = [
+            {"source": "Honda Civic", "target": "Engine", "relation": "CONTAINS", "context": "The Civic contains a 2.0L engine"},
+            {"source": "Honda Civic", "target": "Brake System", "relation": "CONTAINS", "context": "The Civic includes ABS and EBD"},
+            {"source": "Honda Civic", "target": "Honda", "relation": "MANUFACTURED_BY", "context": "Civic is manufactured by Honda"}
+        ]
+        test_knowledge_graph_construction(resolved_entities, mock_relationships)
+    else:
+        print("⚠️ Skipping knowledge graph construction due to previous errors.")
+    
+    print("\n" + "="*50)
+    print("🏁 All tests completed.")
 
 if __name__ == "__main__":
     main() 

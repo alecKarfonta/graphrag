@@ -1,253 +1,104 @@
 # Graph RAG System
 
-A state-of-the-art Graph RAG (Retrieval-Augmented Generation) system that combines knowledge graphs with vector search to provide superior question-answering capabilities for niche domains.
+An advanced Retrieval-Augmented Generation (RAG) system that leverages a knowledge graph to provide context-rich, accurate answers from a corpus of documents. This project integrates cutting-edge NLP models for entity and relationship extraction, graph-based data storage, and a hybrid retrieval system to power its question-answering capabilities.
 
-## 🚀 Features
+## Key Features
 
-- **Multi-format Document Processing**: PDF, DOCX, TXT, HTML, CSV, JSON
-- **Intelligent Entity Extraction**: LLM-powered entity and relationship extraction
-- **Knowledge Graph Construction**: Automatic graph building with Neo4j
-- **Hybrid Search**: Vector search + graph traversal for comprehensive retrieval
-- **Interactive Visualization**: Real-time knowledge graph visualization
-- **RAG Integration**: LLM-powered answer generation from retrieved context
-- **Containerized Deployment**: Docker Compose setup for easy deployment
+- **Intelligent Document Processing**: Ingests and processes multiple document formats (PDF, DOCX, TXT, etc.), using semantic chunking for meaningful data segmentation.
+- **High-Fidelity Extraction**: Utilizes the GLiNER model for precise entity and relationship extraction, forming the backbone of the knowledge graph.
+- **Knowledge Graph Construction**: Automatically builds and maintains a robust knowledge graph in Neo4j, capturing complex relationships within the source data.
+- **Hybrid Retrieval System**: Combines semantic vector search (via Qdrant) and graph-based traversal to retrieve the most relevant context for a given query.
+- **Interactive Frontend**: A React-based user interface for document management, knowledge graph exploration, and interacting with the RAG system.
+- **Containerized Deployment**: Fully containerized with Docker for easy setup, consistent development, and scalable deployment.
 
-## 🏗️ Architecture
+## System Architecture
 
-### Core Components
+The system is composed of three main services orchestrated by Docker Compose:
 
-1. **Backend (FastAPI)**
-   - Document processing pipeline
-   - Entity extraction with Claude LLM
-   - Knowledge graph construction
-   - Hybrid search engine
-   - RAG answer generation
+1.  **Backend (FastAPI)**: A Python-based API that exposes all the core functionalities, including document ingestion, entity extraction, graph construction, and the RAG pipeline.
+2.  **Frontend (React)**: A modern, responsive user interface for interacting with the backend.
+3.  **Databases**:
+    *   **Neo4j**: A graph database used to store the knowledge graph of entities and relationships.
+    *   **Qdrant**: A vector database used for efficient semantic search over document chunks.
 
-2. **Frontend (React + TypeScript)**
-   - Interactive document upload
-   - Real-time knowledge graph visualization
-   - Query interface with RAG responses
-   - Document management
+## Getting Started
 
-3. **Databases**
-   - **Neo4j**: Knowledge graph storage
-   - **Qdrant**: Vector database for semantic search
-
-4. **LLM Integration**
-   - **Claude 3 Sonnet**: Entity extraction and RAG generation
-
-## 🛠️ Technology Stack
-
-- **Backend**: Python, FastAPI, LangChain
-- **Frontend**: React, TypeScript, Tailwind CSS
-- **Databases**: Neo4j, Qdrant
-- **LLM**: Anthropic Claude 3 Sonnet
-- **Deployment**: Docker, Docker Compose
-
-## 📋 Prerequisites
+### Prerequisites
 
 - Docker and Docker Compose
-- Anthropic API key for Claude LLM
+- An Anthropic API key (for the LLM-based response generation)
 
-## 🚀 Quick Start
+### Installation
 
-### 1. Clone the Repository
+1.  **Clone the Repository**
+    ```bash
+    git clone <your-repo-url>
+    cd graphrag
+    ```
 
-```bash
-git clone <your-repo-url>
-cd graphrag
-```
+2.  **Configure Environment Variables**
+    Create a `.env` file in the project root by copying the example:
+    ```bash
+    cp .env.example .env
+    ```
+    Now, edit the `.env` file and add your Anthropic API key:
+    ```
+    # .env
+    ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+    ```
 
-### 2. Set Up Environment Variables
+3.  **Launch the System**
+    ```bash
+    docker compose up -d --build
+    ```
+    This command will build the Docker images and start all the services in the background.
 
-Create a `.env` file in the root directory:
+### Accessing the Services
 
-```bash
-# Anthropic API Key (required for entity extraction and RAG)
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
+- **Application Frontend**: `http://localhost:3000`
+- **Backend API**: `http://localhost:8000/docs`
+- **Neo4j Browser**: `http://localhost:7474`
+- **Qdrant Dashboard**: `http://localhost:6333/dashboard`
 
-# Optional: Custom database URLs
-NEO4J_URI=bolt://localhost:7687
-QDRANT_URL=http://localhost:6333
-```
+## Usage
 
-### 3. Start the System
+1.  **Upload Documents**: Navigate to the web interface and upload your documents. The system will process them, extract entities, and build the knowledge graph automatically.
+2.  **Explore the Graph**: Use the graph visualization tool to explore the extracted entities and their relationships.
+3.  **Ask Questions**: Use the query interface to ask natural language questions. The system will use the RAG pipeline to retrieve relevant information and generate a comprehensive answer.
 
-```bash
-docker compose up -d
-```
+## Testing
 
-This will start:
-- **API Server**: http://localhost:8000
-- **Frontend**: http://localhost:3000
-- **Neo4j**: http://localhost:7474
-- **Qdrant**: http://localhost:6333
+The project includes a suite of tests to ensure the reliability of its components. The tests are organized into `unit`, `integration`, and `e2e` (end-to-end) categories.
 
-### 4. Access the Application
-
-Open your browser and navigate to http://localhost:3000
-
-## 📖 Usage
-
-### 1. Upload Documents
-
-1. Go to the **Document Manager** tab
-2. Click "Upload Documents" or drag and drop files
-3. Supported formats: PDF, DOCX, TXT, HTML, CSV, JSON
-4. The system will automatically:
-   - Process and chunk documents
-   - Extract entities and relationships
-   - Build the knowledge graph
-   - Add to vector store
-
-### 2. Explore the Knowledge Graph
-
-1. Go to the **Knowledge Graph** tab
-2. View the interactive graph visualization
-3. See entities (nodes) and relationships (edges)
-4. Use the refresh button to update the view
-
-### 3. Ask Questions
-
-1. Go to the **Query Interface** tab
-2. Type your question in natural language
-3. The system will:
-   - Search through documents using hybrid retrieval
-   - Generate comprehensive answers using RAG
-   - Show relevant sources and entities
-
-## 🔧 Configuration
-
-### Entity Types
-
-The system supports domain-specific entity types:
-
-- **General**: PERSON, ORGANIZATION, LOCATION, CONCEPT, PROCESS
-- **Technical**: COMPONENT, SPECIFICATION, PROCEDURE, SYSTEM, INTERFACE
-- **Automotive**: COMPONENT, SPECIFICATION, PROCEDURE, MAINTENANCE_ITEM, SYMPTOM, SOLUTION
-- **Medical**: SYMPTOM, DIAGNOSIS, TREATMENT, MEDICATION, PROCEDURE
-- **Legal**: LAW, REGULATION, CASE, PRECEDENT, JURISDICTION
-
-### Relationship Types
-
-- **General**: RELATES_TO, PART_OF, CONTAINS, CAUSES, REQUIRES
-- **Technical**: CONNECTS_TO, DEPENDS_ON, IMPLEMENTS, CONFIGURES, MONITORS
-- **Automotive**: PART_OF, CONNECTS_TO, REQUIRES, CAUSES, FIXES, SCHEDULED_AT
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **API Connection Failed**
-   - Ensure all containers are running: `docker compose ps`
-   - Check logs: `docker compose logs api`
-
-2. **Entity Extraction Hanging**
-   - The system now processes chunks in batches with timeouts
-   - Check API logs for progress updates
-   - Large documents may take several minutes
-
-3. **Knowledge Graph Empty**
-   - Ensure documents have been uploaded successfully
-   - Check that entity extraction completed without errors
-   - Verify Neo4j connection
-
-### Logs and Debugging
+To run the tests, execute the test scripts located in the `backend/` directory from within the `api` container:
 
 ```bash
-# View all container logs
-docker compose logs
-
-# View specific service logs
-docker compose logs api
-docker compose logs frontend
-docker compose logs neo4j
-docker compose logs qdrant
-
-# Rebuild containers
-docker compose up -d --build
+# Example: Run the end-to-end test for the extraction pipeline
+docker compose exec api python test_entity_extraction.py
 ```
 
-## 🔄 Development
+## Project Structure
 
-### Project Structure
+The repository is organized into the following directories:
 
 ```
-graphrag/
-├── backend/                 # FastAPI backend
-│   ├── main.py             # Main API server
-│   ├── entity_extractor.py # LLM-based entity extraction
-│   ├── knowledge_graph_builder.py # Neo4j graph operations
-│   ├── hybrid_retriever.py # Vector + graph search
-│   └── requirements.txt    # Python dependencies
-├── frontend/               # React frontend
-│   ├── src/
-│   │   ├── App.tsx        # Main application
-│   │   └── index.css      # Styles
-│   └── package.json       # Node.js dependencies
-├── docker-compose.yml      # Container orchestration
-├── .env                    # Environment variables
-└── README.md              # This file
+.
+├── backend/            # FastAPI application, core logic, and models
+├── docs/               # Project documentation files
+├── frontend/           # React frontend application
+├── scripts/            # Utility and demonstration scripts
+├── tests/              # Unit, integration, and e2e tests
+│   ├── data/           # Test data and documents
+│   ├── e2e/
+│   ├── integration/
+│   └── unit/
+├── .env.example        # Example environment variables
+├── .gitignore          # Files and directories to be ignored by Git
+├── docker-compose.yml  # Docker Compose configuration
+└── README.md           # This file
 ```
 
-### Adding New Features
+## Troubleshooting
 
-1. **Backend Changes**
-   - Modify Python files in `backend/`
-   - Rebuild: `docker compose up -d --build api`
-
-2. **Frontend Changes**
-   - Modify React files in `frontend/src/`
-   - Rebuild: `docker compose up -d --build frontend`
-
-3. **Database Changes**
-   - Modify Neo4j schema in `knowledge_graph_builder.py`
-   - Modify Qdrant schema in `hybrid_retriever.py`
-
-## 📊 Performance
-
-### Optimization Features
-
-- **Batch Processing**: Entity extraction processes chunks in batches
-- **Timeout Handling**: 30-second timeout per chunk prevents hanging
-- **Error Recovery**: Continues processing even if some chunks fail
-- **Progress Logging**: Real-time progress updates during processing
-
-### Scaling Considerations
-
-- **Large Documents**: Process in smaller chunks for better performance
-- **API Limits**: Monitor Anthropic API usage and rate limits
-- **Memory Usage**: Neo4j and Qdrant can be memory-intensive for large graphs
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes
-4. Test thoroughly
-5. Commit: `git commit -m 'Add feature'`
-6. Push: `git push origin feature-name`
-7. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- **Anthropic** for Claude LLM API
-- **Neo4j** for graph database
-- **Qdrant** for vector database
-- **FastAPI** for the web framework
-- **React** for the frontend framework
-
-## 📞 Support
-
-For issues and questions:
-1. Check the troubleshooting section above
-2. Review the logs for error messages
-3. Open an issue on GitHub with detailed information
-
----
-
-**Happy Graph RAG-ing! 🕸️🚀** 
+- **Container Issues**: Use `docker compose ps` to check the status of all running containers and `docker compose logs <service_name>` (e.g., `api`, `frontend`) to view their logs.
+- **Dependency Problems**: If you encounter issues after adding new packages, you may need to rebuild your containers: `docker compose up -d --build`. 
