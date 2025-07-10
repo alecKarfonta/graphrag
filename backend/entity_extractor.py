@@ -1,7 +1,5 @@
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
 import json
 import re
 import os
@@ -38,30 +36,13 @@ class ExtractionResult:
 class EntityExtractor:
     """GLiNER-based entity and relationship extractor with LLM fallback."""
     
-    def __init__(self, model_name: str = "claude-3-sonnet-20240229", api_key: str | None = None, disable_llm_fallback: bool = True):
-        """Initialize the entity extractor with GLiNER and optional LLM fallback."""
+    def __init__(self, model_name: str = "claude-3-sonnet-20240229", api_key: str | None = None):
+        """Initialize the entity extractor with GLiNER only."""
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.disable_llm_fallback = disable_llm_fallback or os.getenv("DISABLE_LLM_FALLBACK", "false").lower() == "true"
         
-        # Initialize LLM for fallback (only if not disabled)
-        if not self.disable_llm_fallback and self.api_key:
-            try:
-                self.llm = ChatAnthropic(
-                    model=model_name,
-                    temperature=0.1,
-                    max_tokens=2048,
-                    anthropic_api_key=self.api_key
-                )
-                print("✅ LLM initialized for fallback")
-            except Exception as e:
-                print(f"⚠️ Could not initialize LLM: {e}")
-                self.llm = None
-        else:
-            self.llm = None
-            if self.disable_llm_fallback:
-                print("ℹ️ LLM fallback disabled for entity/relationship extraction")
-            else:
-                print("⚠️ No ANTHROPIC_API_KEY found. LLM features will be disabled.")
+        # No LLM fallback - only use GLiNER for entity/relationship extraction
+        self.llm = None
+        print("ℹ️ Using GLiNER only for entity/relationship extraction")
         
         # Define entity types for different domains
         self.entity_types = {
@@ -204,28 +185,20 @@ class EntityExtractor:
         else:
             print(f"⚠️ GLiNER not available, falling back to LLM")
         
-        # Fall back to LLM-based extraction (only if not disabled)
-        if self.disable_llm_fallback:
-            print(f"⚠️ LLM fallback disabled - skipping extraction")
-            return ExtractionResult(
-                entities=[],
-                relationships=[],
-                claims=[],
-                source_chunk=text_chunk
-            )
-        else:
-            print(f"🔍 Using LLM-based entity extraction...")
-            return self._extract_with_llm(text_chunk, domain)
+        # No LLM fallback - return empty result if GLiNER fails
+        print(f"⚠️ GLiNER extraction failed - no LLM fallback available")
+        return ExtractionResult(
+            entities=[],
+            relationships=[],
+            claims=[],
+            source_chunk=text_chunk
+        )
     
     def _extract_relationships_with_llm(self, text_chunk: str, entities: List[Entity], domain: str) -> tuple[List[Relationship], List[str]]:
         """Extract relationships using LLM given the entities."""
-        # Check if LLM fallback is disabled
-        if self.disable_llm_fallback:
-            print(f"⚠️ LLM fallback disabled for relationship extraction - skipping")
-            return [], []
-        
-        if not self.llm:
-            return [], []
+        # No LLM fallback available
+        print(f"⚠️ LLM fallback not available for relationship extraction - skipping")
+        return [], []
         
         # Create a focused prompt for relationship extraction
         entity_names = [e.name for e in entities]
@@ -284,15 +257,14 @@ class EntityExtractor:
     def _extract_with_llm(self, text_chunk: str, domain: str) -> ExtractionResult:
         """Extract entities and relationships using LLM (fallback method)."""
         
-        # Check if LLM fallback is disabled
-        if self.disable_llm_fallback:
-            print(f"⚠️ LLM fallback disabled - skipping extraction")
-            return ExtractionResult(
-                entities=[],
-                relationships=[],
-                claims=[],
-                source_chunk=text_chunk
-            )
+        # No LLM fallback available
+        print(f"⚠️ LLM fallback not available - skipping extraction")
+        return ExtractionResult(
+            entities=[],
+            relationships=[],
+            claims=[],
+            source_chunk=text_chunk
+        )
         
         # Get entity and relationship types for the domain
         entity_types = self.entity_types.get(domain, self.entity_types["general"])

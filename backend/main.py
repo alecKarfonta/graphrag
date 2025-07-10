@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body
+from fastapi import (
+    FastAPI, HTTPException, File, UploadFile, Form, Body
+)
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
@@ -44,6 +46,25 @@ document_processor = DocumentProcessor()
 enhanced_processor = EnhancedDocumentProcessor()
 hybrid_retriever = HybridRetriever(qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"))
 query_processor = QueryProcessor()
+
+# Initialize LLM for response generation
+api_key = os.getenv("ANTHROPIC_API_KEY")
+if api_key:
+    try:
+        from langchain_anthropic import ChatAnthropic
+        response_llm = ChatAnthropic(
+            model="claude-3-sonnet-20240229",
+            temperature=0.1,
+            max_tokens=2048,
+            anthropic_api_key=api_key
+        )
+        print("✅ LLM initialized for response generation")
+    except Exception as e:
+        print(f"⚠️ Could not initialize LLM for response generation: {e}")
+        response_llm = None
+else:
+    print("⚠️ No ANTHROPIC_API_KEY found. LLM response generation will be disabled.")
+    response_llm = None
 
 # Initialize knowledge graph components
 try:
@@ -99,6 +120,17 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = 10
     threshold: float = 0.0
+
+class FilteredGraphRequest(BaseModel):
+    domain: str | None = None
+    max_entities: int = 500
+    max_relationships: int = 500
+    min_occurrence: int = 1
+    min_confidence: float = 0.0
+    entity_types: List[str] | None = None
+    relationship_types: List[str] | None = None
+    sort_by: str = "occurrence"  # "occurrence", "confidence", "name"
+    sort_order: str = "desc"  # "asc", "desc"
 
 @app.get("/")
 def read_root():
@@ -282,13 +314,21 @@ Question: {query}
 
 Please provide a comprehensive answer based on the context above. Include specific details and cite sources when possible."""
 
-            try:
-                # Use the LLM from entity_extractor to generate answer
-                response = entity_extractor.llm.invoke(rag_prompt)
-                generated_answer = response.content if hasattr(response, 'content') else str(response)
-            except Exception as llm_error:
-                print(f"LLM generation error: {llm_error}")
-                generated_answer = f"Found {len(results)} relevant results, but could not generate a comprehensive answer due to an error."
+            # Check if LLM is available
+            if response_llm:
+                try:
+                    # Use the dedicated LLM for response generation
+                    response = response_llm.invoke(rag_prompt)
+                    generated_answer = response.content if hasattr(response, 'content') else str(response)
+                except Exception as llm_error:
+                    print(f"LLM generation error: {llm_error}")
+                    generated_answer = f"Found {len(results)} relevant results, but could not generate a comprehensive answer due to an error."
+            else:
+                print("⚠️ LLM not available, providing basic response")
+                generated_answer = f"Found {len(results)} relevant results. Here are the key details:\n\n"
+                for i, result in enumerate(results[:3], 1):
+                    generated_answer += f"{i}. {result.content[:200]}...\n\n"
+                generated_answer += "For a more detailed analysis, please ensure the LLM service is properly configured."
         
         # If no results or no LLM, provide a basic response
         if not generated_answer:
@@ -381,12 +421,21 @@ async def advanced_search(request: AdvancedSearchRequest = Body(...)):
             rag_prompt = f"""You are a helpful assistant that answers questions based on the provided context. \
 Use the following context to answer the user's question. If the context doesn't contain enough information to answer the question, say so clearly.\n\nContext:\n{full_context}\n\nQuestion: {request.query}\n\nPlease provide a comprehensive answer based on the context above. Include specific details and cite sources when possible."""
             print(f"[DEBUG] Final LLM prompt:\n{rag_prompt}")
-            try:
-                response = entity_extractor.llm.invoke(rag_prompt)
-                generated_answer = response.content if hasattr(response, 'content') else str(response)
-            except Exception as llm_error:
-                print(f"LLM generation error: {llm_error}")
-                generated_answer = f"Found {len(results)} relevant results, but could not generate a comprehensive answer due to an error."
+            
+            # Check if LLM is available
+            if response_llm:
+                try:
+                    response = response_llm.invoke(rag_prompt)
+                    generated_answer = response.content if hasattr(response, 'content') else str(response)
+                except Exception as llm_error:
+                    print(f"LLM generation error: {llm_error}")
+                    generated_answer = f"Found {len(results)} relevant results, but could not generate a comprehensive answer due to an error."
+            else:
+                print("⚠️ LLM not available, providing basic response")
+                generated_answer = f"Found {len(results)} relevant results. Here are the key details:\n\n"
+                for i, result in enumerate(results[:3], 1):
+                    generated_answer += f"{i}. {result.content[:200]}...\n\n"
+                generated_answer += "For a more detailed analysis, please ensure the LLM service is properly configured."
         # If no results or no LLM, provide a basic response
         if not generated_answer:
             if not results:
@@ -594,20 +643,138 @@ async def get_domain_statistics():
         raise HTTPException(status_code=500, detail=f"Error getting domain statistics: {str(e)}")
 
 @app.get("/knowledge-graph/export")
-async def export_knowledge_graph(format: str = "json", domain: str | None = None):
-    """Export knowledge graph data, optionally filtered by domain."""
+async def export_knowledge_graph(
+    format: str = "json", 
+    domain: str | None = None,
+    max_entities: int = 500,
+    max_relationships: int = 500,
+    min_occurrence: int = 1
+):
+    """Export knowledge graph data with optional filtering."""
     try:
         if not knowledge_graph_builder:
             raise HTTPException(status_code=503, detail="Knowledge graph not available")
         
         if format == "json":
-            graph_data = knowledge_graph_builder.export_graph_json(domain)
-            return graph_data
+            # Use filtered export for better performance
+            graph_data = knowledge_graph_builder.get_filtered_graph_data(
+                domain=domain,
+                max_entities=max_entities,
+                max_relationships=max_relationships,
+                min_occurrence=min_occurrence
+            )
+            return JSONResponse(content=graph_data)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error exporting graph: {str(e)}")
+
+@app.post("/knowledge-graph/filtered")
+async def get_filtered_knowledge_graph(request: FilteredGraphRequest = Body(...)):
+    """Get filtered knowledge graph data with occurrence thresholds and limits."""
+    try:
+        if not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Knowledge graph not available")
+        
+        # Get filtered graph data
+        filtered_data = knowledge_graph_builder.get_filtered_graph_data(
+            domain=request.domain,
+            max_entities=request.max_entities,
+            max_relationships=request.max_relationships,
+            min_occurrence=request.min_occurrence,
+            min_confidence=request.min_confidence,
+            entity_types=request.entity_types,
+            relationship_types=request.relationship_types,
+            sort_by=request.sort_by,
+            sort_order=request.sort_order
+        )
+        
+        return {
+            "filtered_data": filtered_data,
+            "filters_applied": {
+                "domain": request.domain,
+                "max_entities": request.max_entities,
+                "max_relationships": request.max_relationships,
+                "min_occurrence": request.min_occurrence,
+                "min_confidence": request.min_confidence,
+                "entity_types": request.entity_types,
+                "relationship_types": request.relationship_types,
+                "sort_by": request.sort_by,
+                "sort_order": request.sort_order
+            },
+            "total_entities_before_filter": filtered_data.get("total_entities_before_filter", 0),
+            "total_relationships_before_filter": filtered_data.get("total_relationships_before_filter", 0),
+            "entities_after_filter": len(filtered_data.get("entities", [])),
+            "relationships_after_filter": len(filtered_data.get("relationships", []))
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting filtered graph: {str(e)}")
+
+@app.get("/knowledge-graph/top-entities")
+async def get_top_entities(
+    domain: str | None = None,
+    limit: int = 50,
+    min_occurrence: int = 1,
+    entity_type: str | None = None
+):
+    """Get top entities by occurrence count."""
+    try:
+        if not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Knowledge graph not available")
+        
+        top_entities = knowledge_graph_builder.get_top_entities(
+            domain=domain,
+            limit=limit,
+            min_occurrence=min_occurrence,
+            entity_type=entity_type
+        )
+        
+        return {
+            "top_entities": top_entities,
+            "filters": {
+                "domain": domain,
+                "limit": limit,
+                "min_occurrence": min_occurrence,
+                "entity_type": entity_type
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting top entities: {str(e)}")
+
+@app.get("/knowledge-graph/top-relationships")
+async def get_top_relationships(
+    domain: str | None = None,
+    limit: int = 50,
+    min_weight: int = 1,
+    relationship_type: str | None = None
+):
+    """Get top relationships by weight/occurrence count."""
+    try:
+        if not knowledge_graph_builder:
+            raise HTTPException(status_code=503, detail="Knowledge graph not available")
+        
+        top_relationships = knowledge_graph_builder.get_top_relationships(
+            domain=domain,
+            limit=limit,
+            min_weight=min_weight,
+            relationship_type=relationship_type
+        )
+        
+        return {
+            "top_relationships": top_relationships,
+            "filters": {
+                "domain": domain,
+                "limit": limit,
+                "min_weight": min_weight,
+                "relationship_type": relationship_type
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting top relationships: {str(e)}")
 
 @app.post("/add-to-vector-store")
 async def add_to_vector_store_legacy(files: List[UploadFile] = File(...)):
@@ -1315,12 +1482,17 @@ Please provide a comprehensive answer that:
 
 Answer:"""
                     
-                    try:
-                        response = entity_extractor.llm.invoke(rag_prompt)
-                        answer = response.content if hasattr(response, 'content') else str(response)
-                    except Exception as llm_error:
-                        logger.error(f"LLM generation error: {llm_error}")
-                        answer = f"Based on the enhanced reasoning analysis, I found {len(result.reasoning_paths)} relevant reasoning paths. Please try rephrasing your query for more specific results."
+                    # Check if LLM is available
+                    if response_llm:
+                        try:
+                            response = response_llm.invoke(rag_prompt)
+                            answer = response.content if hasattr(response, 'content') else str(response)
+                        except Exception as llm_error:
+                            logger.error(f"LLM generation error: {llm_error}")
+                            answer = f"Based on the enhanced reasoning analysis, I found {len(result.reasoning_paths)} relevant reasoning paths. Please try rephrasing your query for more specific results."
+                    else:
+                        logger.warning("LLM not available for enhanced reasoning")
+                        answer = f"Based on the enhanced reasoning analysis, I found {len(result.reasoning_paths)} relevant reasoning paths. For detailed analysis, please ensure the LLM service is properly configured."
             else:
                 answer = "No enhanced reasoning results found for this query. Please try rephrasing or providing more specific information."
         

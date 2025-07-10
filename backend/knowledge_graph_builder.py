@@ -462,6 +462,200 @@ class KnowledgeGraphBuilder:
         
         return sorted(list(domains))
     
+    def get_filtered_graph_data(self, domain: str | None = None, max_entities: int = 100, 
+                               max_relationships: int = 200, min_occurrence: int = 1, 
+                               min_confidence: float = 0.0, entity_types: List[str] | None = None,
+                               relationship_types: List[str] | None = None, sort_by: str = "occurrence",
+                               sort_order: str = "desc") -> Dict[str, Any]:
+        """
+        Get filtered knowledge graph data with support for various filtering options.
+        """
+        with self.driver.session() as session:
+            # Base query to get all nodes and relationships
+            base_query = """
+            MATCH (n:Entity)
+            OPTIONAL MATCH (n)-[r:RELATES_TO]->(m:Entity)
+            RETURN n, r, m
+            """
+            
+            # Initial data fetch
+            results = session.run(base_query)
+            
+            # Process nodes and relationships from results
+            all_nodes = {}
+            all_relationships = []
+            
+            for record in results:
+                node_n = record.get('n')
+                if node_n:
+                    node_id = node_n.get('id', node_n.element_id)
+                    if node_id not in all_nodes:
+                        all_nodes[node_id] = {
+                            "id": node_id,
+                            "label": node_n.get('name', 'Unknown'),
+                            "type": list(node_n.labels)[0] if node_n.labels else "Unknown",
+                            "properties": dict(node_n),
+                            "occurrence": node_n.get('occurrence', 1)
+                        }
+                
+                rel = record.get('r')
+                if rel:
+                    source_node = rel.start_node
+                    target_node = rel.end_node
+                    source_id = source_node.get('id', source_node.element_id)
+                    target_id = target_node.get('id', target_node.element_id)
+                    all_relationships.append({
+                        "id": rel.element_id,
+                        "source": source_id,
+                        "target": target_id,
+                        "label": rel.get('type', rel.type),
+                        "type": rel.get('type', rel.type),
+                        "weight": rel.get('weight', 1),
+                        "properties": dict(rel)
+                    })
+
+            # Convert nodes dict to list
+            nodes = list(all_nodes.values())
+            relationships = all_relationships
+
+            total_entities_before_filter = len(nodes)
+            total_relationships_before_filter = len(relationships)
+
+            # Apply filters
+            if domain:
+                nodes = [n for n in nodes if n['properties'].get('domain') == domain]
+                # Filter relationships based on nodes in the domain
+                node_ids_in_domain = {n['id'] for n in nodes}
+                relationships = [r for r in relationships if r['source'] in node_ids_in_domain and r['target'] in node_ids_in_domain]
+
+            if entity_types:
+                nodes = [n for n in nodes if n['type'] in entity_types]
+                node_ids_after_type_filter = {n['id'] for n in nodes}
+                relationships = [r for r in relationships if r['source'] in node_ids_after_type_filter and r['target'] in node_ids_after_type_filter]
+
+            if relationship_types:
+                relationships = [r for r in relationships if r['type'] in relationship_types]
+
+            nodes = [n for n in nodes if n.get('occurrence', 1) >= min_occurrence]
+            
+            # Note: confidence filter might require a 'confidence' property on relationships
+            relationships = [r for r in relationships if r['properties'].get('confidence', 1.0) >= min_confidence]
+
+            # Sorting logic
+            if sort_by == 'occurrence':
+                nodes = sorted(nodes, key=lambda x: x.get('occurrence', 1), reverse=(sort_order == 'desc'))
+            # Add other sorting options as needed
+
+            # Apply limits
+            nodes = nodes[:max_entities]
+            relationships = relationships[:max_relationships]
+            
+            # Ensure relationships only connect nodes that are in the final node list
+            final_node_ids = {n['id'] for n in nodes}
+            relationships = [r for r in relationships if r['source'] in final_node_ids and r['target'] in final_node_ids]
+
+            return {
+                "nodes": nodes,
+                "edges": relationships,
+                "stats": {
+                    "nodes": len(nodes),
+                    "edges": len(relationships),
+                    "total_entities_before_filter": total_entities_before_filter,
+                    "total_relationships_before_filter": total_relationships_before_filter,
+                },
+                "filters_applied": {
+                    "domain": domain,
+                    "max_entities": max_entities,
+                    "max_relationships": max_relationships,
+                    "min_occurrence": min_occurrence,
+                    "min_confidence": min_confidence,
+                    "entity_types": entity_types,
+                    "relationship_types": relationship_types,
+                    "sort_by": sort_by,
+                    "sort_order": sort_order,
+                }
+            }
+    
+    def get_top_entities(self, domain: str | None = None, limit: int = 50, 
+                        min_occurrence: int = 1, entity_type: str | None = None) -> List[Dict[str, Any]]:
+        """Get top entities by occurrence count."""
+        
+        # Get all nodes
+        all_nodes = list(self.graph.nodes(data=True))
+        
+        # Filter by domain
+        if domain:
+            all_nodes = [(node, data) for node, data in all_nodes if data.get("domain") == domain]
+        
+        # Filter by occurrence threshold
+        all_nodes = [(node, data) for node, data in all_nodes 
+                     if data.get("occurrence", 1) >= min_occurrence]
+        
+        # Filter by entity type
+        if entity_type:
+            all_nodes = [(node, data) for node, data in all_nodes 
+                        if data.get("type") == entity_type]
+        
+        # Sort by occurrence (descending)
+        all_nodes.sort(key=lambda x: x[1].get("occurrence", 1), reverse=True)
+        
+        # Apply limit
+        top_nodes = all_nodes[:limit]
+        
+        # Convert to list format
+        top_entities = []
+        for node, data in top_nodes:
+            top_entities.append({
+                "name": node,
+                "type": data.get("type", "UNKNOWN"),
+                "occurrence": data.get("occurrence", 1),
+                "confidence": data.get("confidence", 1.0),
+                "domain": data.get("domain", "general"),
+                "description": data.get("description", "")
+            })
+        
+        return top_entities
+    
+    def get_top_relationships(self, domain: str | None = None, limit: int = 50, 
+                             min_weight: int = 1, relationship_type: str | None = None) -> List[Dict[str, Any]]:
+        """Get top relationships by weight/occurrence count."""
+        
+        # Get all edges
+        all_edges = list(self.graph.edges(data=True))
+        
+        # Filter by domain
+        if domain:
+            all_edges = [(u, v, data) for u, v, data in all_edges if data.get("domain") == domain]
+        
+        # Filter by weight threshold
+        all_edges = [(u, v, data) for u, v, data in all_edges 
+                     if data.get("weight", 1) >= min_weight]
+        
+        # Filter by relationship type
+        if relationship_type:
+            all_edges = [(u, v, data) for u, v, data in all_edges 
+                        if data.get("type") == relationship_type]
+        
+        # Sort by weight (descending)
+        all_edges.sort(key=lambda x: x[2].get("weight", 1), reverse=True)
+        
+        # Apply limit
+        top_edges = all_edges[:limit]
+        
+        # Convert to list format
+        top_relationships = []
+        for u, v, data in top_edges:
+            top_relationships.append({
+                "source": u,
+                "target": v,
+                "type": data.get("type", "RELATES_TO"),
+                "weight": data.get("weight", 1),
+                "domain": data.get("domain", "general"),
+                "context": data.get("context", "")
+            })
+        
+        return top_relationships
+    
     def get_domain_statistics(self) -> Dict[str, Dict[str, Any]]:
         """Get statistics for each domain in the knowledge graph."""
         domain_stats = {}

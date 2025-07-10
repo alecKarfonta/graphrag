@@ -6,13 +6,13 @@
           {
             "test_name": "basic_entity_extraction",
             "passed": true,
-            "entities_found": 3,
-            "relationships_found": 2
+            "entities_found": 1,
+            "relationships_found": 0
           },
           {
             "test_name": "domain_specific_extraction",
             "passed": true,
-            "entities_found": 3,
+            "entities_found": 2,
             "domain": "automotive"
           }
         ],
@@ -74,7 +74,7 @@
       "full_pipeline": {
         "test_name": "full_pipeline",
         "passed": true,
-        "entities_extracted": 3,
+        "entities_extracted": 1,
         "query_processed": true
       },
       "document_to_graph": {
@@ -102,21 +102,21 @@
     "results": {
       "entity_extraction_performance": {
         "test_name": "entity_extraction_performance",
-        "total_time": 21.246204137802124,
-        "avg_time_per_doc": 7.082068045934041,
+        "total_time": 1.311537265777588,
+        "avg_time_per_doc": 0.4371790885925293,
         "documents_processed": 3,
-        "performance_acceptable": false
+        "performance_acceptable": true
       },
       "query_response_time": {
         "test_name": "query_response_time",
-        "avg_response_time": 0.01972500483194987,
-        "max_response_time": 0.02172255516052246,
-        "min_response_time": 0.018500804901123047,
+        "avg_response_time": 0.016133626302083332,
+        "max_response_time": 0.016722440719604492,
+        "min_response_time": 0.015777587890625,
         "performance_acceptable": true
       },
       "graph_construction_performance": {
         "test_name": "graph_construction_performance",
-        "construction_time": 1.1205673217773438e-05,
+        "construction_time": 7.3909759521484375e-06,
         "performance_acceptable": true
       },
       "memory_usage": {
@@ -126,35 +126,35 @@
       },
       "concurrent_requests": {
         "test_name": "concurrent_requests",
-        "avg_concurrent_time": 0.044165849685668945,
-        "max_concurrent_time": 0.045250654220581055,
+        "avg_concurrent_time": 0.04622936248779297,
+        "max_concurrent_time": 0.04705500602722168,
         "performance_acceptable": true
       }
     },
-    "avg_response_time": 0.01972500483194987,
-    "performance_score": 0.6
+    "avg_response_time": 0.016133626302083332,
+    "performance_score": 0.8
   },
   "quality_tests": {
     "results": {
       "entity_extraction_accuracy": {
         "test_name": "entity_extraction_accuracy",
-        "accuracy": 0.13333333333333333,
-        "precision": 0.1111111111111111,
-        "recall": 0.16666666666666666,
+        "accuracy": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
         "performance_acceptable": false
       },
       "query_response_accuracy": {
         "test_name": "query_response_accuracy",
         "accuracy": 0.04786324786324786,
-        "avg_response_time": 1.8006869157155354,
+        "avg_response_time": 2.0341294606526694,
         "performance_acceptable": "False"
       },
       "graph_completeness": {
         "test_name": "graph_completeness",
-        "total_nodes": 211,
-        "total_relationships": 164,
-        "graph_density": 0.0037011961182577295,
-        "performance_acceptable": true
+        "total_nodes": 0,
+        "total_relationships": 0,
+        "graph_density": 0,
+        "performance_acceptable": false
       },
       "retrieval_relevance": {
         "test_name": "retrieval_relevance",
@@ -163,9 +163,9 @@
         "performance_acceptable": "False"
       }
     },
-    "avg_accuracy": 0.12706552706552707,
-    "quality_score": 0.12706552706552707
+    "avg_accuracy": 0.08262108262108261,
+    "quality_score": 0.08262108262108261
   },
-  "total_execution_time": 84.72896337509155,
-  "overall_score": 0.6704131054131053
+  "total_execution_time": 18.866265535354614,
+  "overall_score": 0.7015242165242165
 }
