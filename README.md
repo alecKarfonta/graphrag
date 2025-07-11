@@ -32,7 +32,7 @@ The system is composed of three main services orchestrated by Docker Compose:
 
 1.  **Clone the Repository**
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/alecKarfonta/graphrag
     cd graphrag
     ```
 

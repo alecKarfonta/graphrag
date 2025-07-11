@@ -137,7 +137,7 @@ class RedditCrawler:
         """Crawl a specific subreddit."""
         logger.info(f"Crawling subreddit: r/{subreddit}")
         
-        if self.reddit_api and config.use_api:
+        if config.use_api and self.reddit_api:
             return await self.crawl_subreddit_api(subreddit, config)
         else:
             return await self.crawl_subreddit_browser(subreddit, config)

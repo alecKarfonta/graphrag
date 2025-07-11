@@ -99,4 +99,5 @@ ingestion_result.json
 *.md
 
 # Backup files
-*.bak 
+*.bak
+backups/ 
