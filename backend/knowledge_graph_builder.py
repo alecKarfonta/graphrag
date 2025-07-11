@@ -85,16 +85,26 @@ class KnowledgeGraphBuilder:
             with self.driver.session() as session:
                 # Add entities with occurrence tracking and domain
                 for entity in entities:
+                    # Handle both Entity objects and dictionaries
+                    if isinstance(entity, dict):
+                        entity_name = entity["name"]
+                        entity_type = entity["type"]
+                        entity_description = entity.get("description", "")
+                    else:
+                        entity_name = entity.name
+                        entity_type = entity.entity_type
+                        entity_description = entity.description
+                    
                     session.run("""
                         MERGE (e:Entity {id: $id})
                         ON CREATE SET e.name = $name, e.type = $type, e.description = $description, 
                                      e.occurrence = 1, e.domain = $domain
                         ON MATCH SET e.occurrence = e.occurrence + 1, e.domain = $domain
                         """, 
-                        id=entity.name,
-                        name=entity.name,
-                        type=entity.entity_type,
-                        description=entity.description,
+                        id=entity_name,
+                        name=entity_name,
+                        type=entity_type,
+                        description=entity_description,
                         domain=domain
                     )
                 
@@ -116,7 +126,16 @@ class KnowledgeGraphBuilder:
         
         # Add to NetworkX for analysis with occurrence tracking and domain
         for entity in entities:
-            entity_name = entity.name
+            # Handle both Entity objects and dictionaries
+            if isinstance(entity, dict):
+                entity_name = entity["name"]
+                entity_type = entity["type"]
+                entity_description = entity.get("description", "")
+            else:
+                entity_name = entity.name
+                entity_type = entity.entity_type
+                entity_description = entity.description
+            
             if entity_name in self.graph:
                 # Increment occurrence count
                 current_occurrence = self.graph.nodes[entity_name].get("occurrence", 1)
@@ -126,8 +145,8 @@ class KnowledgeGraphBuilder:
             else:
                 # Add new node with occurrence count and domain
                 self.graph.add_node(entity_name, 
-                                  type=entity.entity_type,
-                                  description=entity.description,
+                                  type=entity_type,
+                                  description=entity_description,
                                   occurrence=1,
                                   domain=domain)
         
