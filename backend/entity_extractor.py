@@ -63,129 +63,136 @@ class EntityExtractor:
         }
     
     def extract_entities_and_relations(self, text_chunk: str, domain: str = "general") -> ExtractionResult:
-        """Extract entities and relationships from text using GLiNER first, then fall back to Claude."""
+        """Extract entities and relationships from text using GLiNER only."""
         # First, try to use GLiNER for both entity and relationship extraction
         rel_extractor = get_relationship_extractor()
-        if rel_extractor.is_available():
-            try:
-                print(f"🔍 Using GLiNER for entity extraction...")
-                # Use GLiNER to extract entities
-                gliner_entities = rel_extractor.extract_entities(
+        try:
+            print(f"🔍 Using GLiNER for entity extraction...")
+            # Use GLiNER to extract entities
+            gliner_entities = rel_extractor.extract_entities(
+                text=text_chunk,
+                labels=["person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"],
+                threshold=0.5
+            )
+            
+            if gliner_entities.get("entities"):
+                print(f"✅ GLiNER found {len(gliner_entities['entities'])} entities")
+                entities = []
+                for gliner_entity in gliner_entities["entities"]:
+                    entity = Entity(
+                        name=gliner_entity["text"],
+                        entity_type=gliner_entity["label"].upper(),
+                        description=f"Extracted by GLiNER model (confidence: {gliner_entity['score']:.3f})",
+                        confidence=gliner_entity["score"],
+                        source_chunk=text_chunk,
+                        metadata={
+                            "domain": domain,
+                            "ner_source": "gliner_model",
+                            "original_ner_type": gliner_entity["label"]
+                        }
+                    )
+                    entities.append(entity)
+                
+                # Now extract relationships with GLiNER
+                print(f"🔗 Using GLiNER for relationship extraction...")
+                default_relations = [
+                    # Business/Organizational relationships
+                    {"relation": "works for", "pairs_filter": [("person", "organisation")]},
+                    {"relation": "founded", "pairs_filter": [("person", "organisation")]},
+                    {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
+                    {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
+                    {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
+                    {"relation": "produces", "pairs_filter": [("organisation", "product")]},
+                    {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
+                    
+                    # Technical/Component relationships
+                    {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "connects to", "pairs_filter": [("component", "component")]},
+                    {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "controls", "pairs_filter": [("component", "component")]},
+                    {"relation": "supplies", "pairs_filter": [("component", "component")]},
+                    {"relation": "replaces", "pairs_filter": [("component", "component")]},
+                    {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
+                    {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
+                    {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
+                    {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
+                    
+                    # Temporal relationships
+                    {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
+                    {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
+                    
+                    # Specification relationships
+                    {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                    {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
+                    
+                    # General relationships
+                    {"relation": "related to", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
+                    {"relation": "associated with", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
+                    {"relation": "depends on", "pairs_filter": [("component", "component"), ("system", "component"), ("procedure", "component")]},
+                    {"relation": "affects", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
+                    {"relation": "influences", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
+                    {"relation": "supports", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "enables", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "prevents", "pairs_filter": [("component", "component"), ("safety", "component")]},
+                    {"relation": "protects", "pairs_filter": [("component", "component"), ("safety", "component")]},
+                    {"relation": "monitors", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "regulates", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "operates", "pairs_filter": [("component", "component"), ("system", "component")]},
+                    {"relation": "manages", "pairs_filter": [("component", "component"), ("system", "component"), ("person", "organisation")]},
+                    {"relation": "directs", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                    {"relation": "leads", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                    {"relation": "owns", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                    {"relation": "invests in", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
+                    {"relation": "collaborates with", "pairs_filter": [("organisation", "organisation"), ("person", "organisation")]},
+                    {"relation": "competes with", "pairs_filter": [("organisation", "organisation")]},
+                    {"relation": "partners with", "pairs_filter": [("organisation", "organisation")]},
+                ]
+                entity_labels = list({e.entity_type.lower() for e in entities})
+                gliner_result = rel_extractor.extract_relations(
                     text=text_chunk,
-                    labels=["person", "organisation", "location", "date", "component", "system", "symptom", "solution", "maintenance", "specification", "requirement", "safety", "time", "founder", "position"],
+                    relations=default_relations,
+                    entity_labels=entity_labels,
                     threshold=0.5
                 )
+                relationships = []
+                for rel in gliner_result.get("relations", []):
+                    relationships.append(Relationship(
+                        source=rel.get("source") or rel.get("text", ""),
+                        target=rel.get("target", ""),
+                        relation_type=rel.get("label", rel.get("relation", "")),
+                        context=rel.get("context", None),
+                        confidence=rel.get("score", 1.0),
+                        metadata={"extraction_method": "gliner"}
+                    ))
                 
-                if gliner_entities.get("entities"):
-                    print(f"✅ GLiNER found {len(gliner_entities['entities'])} entities")
-                    entities = []
-                    for gliner_entity in gliner_entities["entities"]:
-                        entity = Entity(
-                            name=gliner_entity["text"],
-                            entity_type=gliner_entity["label"].upper(),
-                            description=f"Extracted by GLiNER model (confidence: {gliner_entity['score']:.3f})",
-                            confidence=gliner_entity["score"],
-                            source_chunk=text_chunk,
-                            metadata={
-                                "domain": domain,
-                                "ner_source": "gliner_model",
-                                "original_ner_type": gliner_entity["label"]
-                            }
-                        )
-                        entities.append(entity)
-                    
-                    # Now extract relationships with GLiNER
-                    print(f"🔗 Using GLiNER for relationship extraction...")
-                    default_relations = [
-                        # Business/Organizational relationships
-                        {"relation": "works for", "pairs_filter": [("person", "organisation")]},
-                        {"relation": "founded", "pairs_filter": [("person", "organisation")]},
-                        {"relation": "located in", "pairs_filter": [("organisation", "location"), ("person", "location")]},
-                        {"relation": "acquired", "pairs_filter": [("organisation", "organisation")]},
-                        {"relation": "subsidiary of", "pairs_filter": [("organisation", "organisation")]},
-                        {"relation": "produces", "pairs_filter": [("organisation", "product")]},
-                        {"relation": "part of", "pairs_filter": [("organisation", "organisation")]},
-                        
-                        # Technical/Component relationships
-                        {"relation": "part of", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "connects to", "pairs_filter": [("component", "component")]},
-                        {"relation": "contains", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "controls", "pairs_filter": [("component", "component")]},
-                        {"relation": "supplies", "pairs_filter": [("component", "component")]},
-                        {"relation": "replaces", "pairs_filter": [("component", "component")]},
-                        {"relation": "maintains", "pairs_filter": [("procedure", "component"), ("maintenance", "component")]},
-                        {"relation": "requires", "pairs_filter": [("component", "component"), ("procedure", "component")]},
-                        {"relation": "causes", "pairs_filter": [("component", "symptom"), ("condition", "symptom")]},
-                        {"relation": "fixes", "pairs_filter": [("solution", "symptom"), ("procedure", "symptom")]},
-                        
-                        # Temporal relationships
-                        {"relation": "scheduled for", "pairs_filter": [("maintenance", "time"), ("procedure", "time")]},
-                        {"relation": "created on", "pairs_filter": [("organisation", "date"), ("product", "date")]},
-                        
-                        # Specification relationships
-                        {"relation": "specifies", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
-                        {"relation": "applies to", "pairs_filter": [("specification", "component"), ("requirement", "component")]},
-                        
-                        # General relationships
-                        {"relation": "related to", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
-                        {"relation": "associated with", "pairs_filter": [("component", "component"), ("system", "component"), ("organisation", "organisation"), ("person", "organisation")]},
-                        {"relation": "depends on", "pairs_filter": [("component", "component"), ("system", "component"), ("procedure", "component")]},
-                        {"relation": "affects", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
-                        {"relation": "influences", "pairs_filter": [("component", "component"), ("condition", "symptom"), ("procedure", "component")]},
-                        {"relation": "supports", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "enables", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "prevents", "pairs_filter": [("component", "component"), ("safety", "component")]},
-                        {"relation": "protects", "pairs_filter": [("component", "component"), ("safety", "component")]},
-                        {"relation": "monitors", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "regulates", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "operates", "pairs_filter": [("component", "component"), ("system", "component")]},
-                        {"relation": "manages", "pairs_filter": [("component", "component"), ("system", "component"), ("person", "organisation")]},
-                        {"relation": "directs", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
-                        {"relation": "leads", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
-                        {"relation": "owns", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
-                        {"relation": "invests in", "pairs_filter": [("person", "organisation"), ("organisation", "organisation")]},
-                        {"relation": "collaborates with", "pairs_filter": [("organisation", "organisation"), ("person", "organisation")]},
-                        {"relation": "competes with", "pairs_filter": [("organisation", "organisation")]},
-                        {"relation": "partners with", "pairs_filter": [("organisation", "organisation")]},
-                    ]
-                    entity_labels = list({e.entity_type.lower() for e in entities})
-                    gliner_result = rel_extractor.extract_relations(
-                        text=text_chunk,
-                        relations=default_relations,
-                        entity_labels=entity_labels,
-                        threshold=0.5
-                    )
-                    relationships = []
-                    for rel in gliner_result.get("relations", []):
-                        relationships.append(Relationship(
-                            source=rel.get("source") or rel.get("text", ""),
-                            target=rel.get("target", ""),
-                            relation_type=rel.get("label", rel.get("relation", "")),
-                            context=rel.get("context", None),
-                            confidence=rel.get("score", 1.0),
-                            metadata={"extraction_method": "gliner"}
-                        ))
-                    
-                    # Apply validation and filtering
-                    entities = self.validate_entities(entities)
-                    relationships = self.validate_relationships(relationships, entities)
-                    
-                    print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
-                    
-                    return ExtractionResult(
-                        entities=entities,
-                        relationships=relationships,
-                        claims=[],
-                        source_chunk=text_chunk
-                    )
-                else:
-                    print(f"⚠️ GLiNER found no entities, falling back to LLM")
-            except Exception as e:
-                print(f"⚠️ GLiNER extraction failed: {e}, falling back to LLM")
-        else:
-            print(f"⚠️ GLiNER not available, falling back to LLM")
-        
-    
+                # Apply validation and filtering
+                entities = self.validate_entities(entities)
+                relationships = self.validate_relationships(relationships, entities)
+                
+                print(f"✅ After validation: {len(entities)} entities, {len(relationships)} relationships")
+                
+                return ExtractionResult(
+                    entities=entities,
+                    relationships=relationships,
+                    claims=[],
+                    source_chunk=text_chunk
+                )
+            else:
+                print(f"⚠️ GLiNER found no entities, returning empty result")
+                return ExtractionResult(
+                    entities=[],
+                    relationships=[],
+                    claims=[],
+                    source_chunk=text_chunk
+                )
+        except Exception as e:
+            print(f"⚠️ GLiNER extraction failed: {e}, returning empty result")
+            return ExtractionResult(
+                entities=[],
+                relationships=[],
+                claims=[],
+                source_chunk=text_chunk
+            )
     
     def extract_from_chunks(self, chunks: List[str], domain: str = "general") -> List[ExtractionResult]:
         """Extract entities and relationships from multiple text chunks."""

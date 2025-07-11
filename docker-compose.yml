@@ -29,6 +29,7 @@ services:
       - qdrant
     volumes:
       - ./backend:/app
+      - ./tests:/app/tests
       - api_data:/app/data
       - api_logs:/app/logs
       - api_cache:/app/.cache
@@ -42,8 +43,8 @@ services:
   # Frontend
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     environment:
