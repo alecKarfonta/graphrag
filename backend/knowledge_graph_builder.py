@@ -489,6 +489,9 @@ class KnowledgeGraphBuilder:
         """
         Get filtered knowledge graph data with support for various filtering options.
         """
+        if not self.driver:
+            raise RuntimeError("Neo4j driver not available. Check Neo4j connection configuration.")
+        
         with self.driver.session() as session:
             # Base query to get all nodes and relationships
             base_query = """

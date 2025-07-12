@@ -4,6 +4,10 @@
 - [x] **Reddit crawler**: ✅ COMPLETED - A comprehensive Reddit crawling service has been implemented with multi-modal crawling, configurable depth control, smart filtering, and auto-integration with GraphRAG
 - [x] **Code RAG**: ✅ COMPLETED - Code RAG system has been fully implemented and integrated with GraphRAG for unified code search and analysis capabilities
 
+- [ ] Benchmarks for chunking and RAG, hallucinations
+
+- [ ] 
+
 ## Executive Summary
 
 This plan outlines the development of a state-of-the-art Graph RAG system that combines knowledge graphs with vector search to provide superior question-answering capabilities for niche domains. The system includes document processing, entity extraction, knowledge graph construction, online information gathering, interactive visualization, and intuitive user interaction.
