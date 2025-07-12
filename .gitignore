@@ -104,3 +104,5 @@ backups/ # Evaluation datasets - these are downloaded automatically
 backend/test_evaluation_data/
 backend/evaluation_data/
 **/evaluation_data/
+backend/retrieval_evaluation_data/
+**/retrieval_evaluation_data/

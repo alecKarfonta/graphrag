@@ -9,6 +9,7 @@ import tempfile
 import shutil
 import json
 import logging
+import numpy as np
 from document_processor import DocumentProcessor, DocumentChunk
 from enhanced_document_processor import EnhancedDocumentProcessor
 from hybrid_retriever import HybridRetriever
@@ -18,6 +19,7 @@ from knowledge_graph_builder import KnowledgeGraphBuilder
 from graphrag_evaluator import GraphRAGEvaluator
 from automated_test_suite import AutomatedTestSuite
 from wikisection_evaluator import WikiSectionEvaluator, format_evaluation_report
+from gutenqa_evaluator import GutenQAEvaluator, format_retrieval_report
 from datetime import datetime
 from pydantic import BaseModel
 # Local NER removed - using GLiNER instead
@@ -1322,6 +1324,182 @@ async def get_chunking_evaluation_status():
                 "languages": ["en", "de"],
                 "domains": ["disease", "city"]
             }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+# Retrieval Evaluation Endpoints
+
+@app.post("/evaluate/retrieval")
+async def evaluate_retrieval_performance(
+    book_name: str = "A_Christmas_Carol_-_Charles_Dickens",
+    max_questions: int = 30,
+    method: str = "both",  # "baseline", "hybrid", "both"
+    force_download: bool = False
+):
+    """Evaluate retrieval performance using GutenQA dataset."""
+    try:
+        # Initialize evaluator
+        evaluator = GutenQAEvaluator(data_dir="./retrieval_evaluation_data")
+        
+        # Load dataset
+        if not evaluator.load_gutenqa_dataset(force_download=force_download):
+            raise HTTPException(status_code=500, detail="Failed to load GutenQA dataset")
+        
+        # Check if book exists
+        available_books = evaluator.get_available_books()
+        if book_name not in available_books:
+            raise HTTPException(status_code=404, detail=f"Book not found. Available books: {available_books[:10]}")
+        
+        results = {}
+        
+        # Run evaluation based on method
+        if method in ["baseline", "both"]:
+            try:
+                baseline_result = evaluator.evaluate_baseline_retrieval(book_name, max_questions)
+                results["baseline"] = {
+                    "dcg_at_1": baseline_result.dcg_at_1,
+                    "dcg_at_2": baseline_result.dcg_at_2,
+                    "dcg_at_5": baseline_result.dcg_at_5,
+                    "dcg_at_10": baseline_result.dcg_at_10,
+                    "dcg_at_20": baseline_result.dcg_at_20,
+                    "total_questions": baseline_result.total_questions,
+                    "correct_retrievals": baseline_result.correct_retrievals,
+                    "accuracy": baseline_result.correct_retrievals / baseline_result.total_questions,
+                    "retrieval_method": baseline_result.retrieval_method
+                }
+            except Exception as e:
+                results["baseline_error"] = str(e)
+        
+        if method in ["hybrid", "both"]:
+            try:
+                hybrid_result = evaluator.evaluate_hybrid_retrieval(book_name, max_questions)
+                results["hybrid"] = {
+                    "dcg_at_1": hybrid_result.dcg_at_1,
+                    "dcg_at_2": hybrid_result.dcg_at_2,
+                    "dcg_at_5": hybrid_result.dcg_at_5,
+                    "dcg_at_10": hybrid_result.dcg_at_10,
+                    "dcg_at_20": hybrid_result.dcg_at_20,
+                    "total_questions": hybrid_result.total_questions,
+                    "correct_retrievals": hybrid_result.correct_retrievals,
+                    "accuracy": hybrid_result.correct_retrievals / hybrid_result.total_questions,
+                    "retrieval_method": hybrid_result.retrieval_method
+                }
+            except Exception as e:
+                results["hybrid_error"] = str(e)
+        
+        return {
+            "evaluation_type": "GutenQA",
+            "book_name": book_name,
+            "max_questions": max_questions,
+            "evaluation_method": method,
+            "results": results
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieval evaluation failed: {str(e)}")
+
+@app.post("/evaluate/retrieval/comparative")
+async def evaluate_retrieval_comparative(
+    book_names: List[str] = ["A_Christmas_Carol_-_Charles_Dickens", "Pride_and_Prejudice_-_Jane_Austen"],
+    max_questions_per_book: int = 20,
+    include_baseline: bool = True
+):
+    """Run comparative retrieval evaluation across multiple books."""
+    try:
+        # Initialize evaluator
+        evaluator = GutenQAEvaluator(data_dir="./retrieval_evaluation_data")
+        
+        # Load dataset
+        if not evaluator.load_gutenqa_dataset():
+            raise HTTPException(status_code=500, detail="Failed to load GutenQA dataset")
+        
+        # Check if books exist
+        available_books = evaluator.get_available_books()
+        missing_books = [book for book in book_names if book not in available_books]
+        if missing_books:
+            raise HTTPException(status_code=404, detail=f"Books not found: {missing_books}. Available: {available_books[:10]}")
+        
+        # Run evaluation
+        results = evaluator.evaluate_multiple_books(book_names, max_questions_per_book)
+        
+        # Format results for API response
+        formatted_results = {}
+        for book_name, book_results in results.items():
+            formatted_results[book_name] = {}
+            for method, result in book_results.items():
+                formatted_results[book_name][method] = {
+                    "dcg_at_1": result.dcg_at_1,
+                    "dcg_at_2": result.dcg_at_2,
+                    "dcg_at_5": result.dcg_at_5,
+                    "dcg_at_10": result.dcg_at_10,
+                    "dcg_at_20": result.dcg_at_20,
+                    "total_questions": result.total_questions,
+                    "correct_retrievals": result.correct_retrievals,
+                    "accuracy": result.correct_retrievals / result.total_questions if result.total_questions > 0 else 0.0,
+                    "retrieval_method": result.retrieval_method
+                }
+        
+        # Generate comparison report
+        report = format_retrieval_report(results)
+        
+        # Calculate overall statistics
+        all_hybrid_dcg1 = []
+        all_baseline_dcg1 = []
+        for book_results in results.values():
+            if "hybrid" in book_results:
+                all_hybrid_dcg1.append(book_results["hybrid"].dcg_at_1)
+            if "baseline" in book_results:
+                all_baseline_dcg1.append(book_results["baseline"].dcg_at_1)
+        
+        comparison = {}
+        if all_hybrid_dcg1 and all_baseline_dcg1:
+            comparison = {
+                "average_dcg1_hybrid": np.mean(all_hybrid_dcg1),
+                "average_dcg1_baseline": np.mean(all_baseline_dcg1),
+                "improvement_percent": (np.mean(all_hybrid_dcg1) - np.mean(all_baseline_dcg1)) / np.mean(all_baseline_dcg1) * 100
+            }
+        
+        return {
+            "evaluation_type": "GutenQA Comparative",
+            "books_evaluated": book_names,
+            "max_questions_per_book": max_questions_per_book,
+            "include_baseline": include_baseline,
+            "results": formatted_results,
+            "summary_report": report,
+            "comparison": comparison
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Comparative evaluation failed: {str(e)}")
+
+@app.get("/evaluate/retrieval/status")
+async def get_retrieval_evaluation_status():
+    """Get status of retrieval evaluation system."""
+    try:
+        evaluator = GutenQAEvaluator(data_dir="./retrieval_evaluation_data")
+        
+        # Try to load dataset to check availability
+        dataset_loaded = evaluator.load_gutenqa_dataset()
+        
+        if dataset_loaded:
+            stats = evaluator.get_dataset_statistics()
+            available_books = evaluator.get_available_books()
+        else:
+            stats = {}
+            available_books = []
+        
+        return {
+            "evaluation_system": "GutenQA",
+            "dataset_available": dataset_loaded,
+            "data_directory": evaluator.data_dir,
+            "baseline_model": "facebook/contriever",
+            "hybrid_retriever": "HybridRetriever (vector + graph + keyword)",
+            "supported_metrics": ["DCG@1", "DCG@2", "DCG@5", "DCG@10", "DCG@20", "accuracy"],
+            "dataset_info": stats,
+            "available_books_sample": available_books[:20] if available_books else [],
+            "total_books": len(available_books)
         }
         
     except Exception as e:

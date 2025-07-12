@@ -37,6 +37,7 @@ services:
       - api_documents:/app/documents
       - api_exports:/app/exports
       - evaluation_data:/app/evaluation_data
+      - retrieval_evaluation_data:/app/retrieval_evaluation_data
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -45,12 +46,11 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod  # Use Dockerfile for dev, Dockerfile.prod for production
     ports:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=https://mlapi.us/graphrag/api
-      - PUBLIC_URL=/graphrag
     depends_on:
       - api
     volumes:
@@ -230,6 +230,10 @@ volumes:
   
   # Evaluation data storage
   evaluation_data:
+    driver: local
+  
+  # Retrieval evaluation data storage
+  retrieval_evaluation_data:
     driver: local
 
 networks:
