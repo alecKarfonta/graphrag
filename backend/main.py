@@ -17,6 +17,7 @@ from entity_extractor import EntityExtractor, Entity, Relationship
 from knowledge_graph_builder import KnowledgeGraphBuilder
 from graphrag_evaluator import GraphRAGEvaluator
 from automated_test_suite import AutomatedTestSuite
+from wikisection_evaluator import WikiSectionEvaluator, format_evaluation_report
 from datetime import datetime
 from pydantic import BaseModel
 # Local NER removed - using GLiNER instead
@@ -1157,6 +1158,174 @@ async def get_test_reports():
         return reports
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving test reports: {str(e)}")
+
+# Chunking Evaluation Endpoints
+
+@app.post("/evaluate/chunking")
+async def evaluate_chunking_performance(
+    dataset: str = "wikisection",
+    subset: str = "en_disease",
+    sample_size: int = 50,
+    force_download: bool = False
+):
+    """Evaluate chunking performance using benchmark datasets."""
+    try:
+        if dataset != "wikisection":
+            raise HTTPException(status_code=400, detail=f"Unsupported dataset: {dataset}")
+        
+        # Initialize evaluator
+        evaluator = WikiSectionEvaluator(data_dir="./evaluation_data")
+        
+        # Download dataset if needed
+        if not evaluator.download_dataset(force_download=force_download):
+            raise HTTPException(status_code=500, detail="Failed to download WikiSection dataset")
+        
+        # Load evaluation data
+        documents = evaluator.load_wikisection_data(subset)
+        if not documents:
+            raise HTTPException(status_code=404, detail=f"No documents found for subset: {subset}")
+        
+        # Run evaluation
+        result = evaluator.evaluate_chunking(documents, sample_size=sample_size)
+        
+        return {
+            "evaluation_type": "WikiSection",
+            "subset": subset,
+            "sample_size": min(sample_size, len(documents)),
+            "total_documents": len(documents),
+            "chunking_strategy": "semantic",
+            "model": "all-MiniLM-L6-v2",
+            "metrics": {
+                "precision": result.precision,
+                "recall": result.recall,
+                "f1_score": result.f1_score,
+                "boundary_accuracy": f"{result.correct_boundaries}/{result.total_boundaries}",
+                "boundary_accuracy_percent": round(result.correct_boundaries/result.total_boundaries*100, 2) if result.total_boundaries > 0 else 0.0
+            },
+            "results": {
+                "correct_boundaries": result.correct_boundaries,
+                "total_boundaries": result.total_boundaries,
+                "dataset_name": result.dataset_name,
+                "chunking_method": result.chunking_method
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+@app.post("/evaluate/chunking/comparative")
+async def evaluate_chunking_comparative(
+    subsets: List[str] = ["en_disease", "en_city"],
+    sample_size: int = 50,
+    include_baseline: bool = True,
+    baseline_chunk_size: int = 500
+):
+    """Run comparative evaluation across multiple WikiSection subsets."""
+    try:
+        # Initialize evaluator
+        evaluator = WikiSectionEvaluator(data_dir="./evaluation_data")
+        
+        # Download dataset if needed
+        if not evaluator.download_dataset():
+            raise HTTPException(status_code=500, detail="Failed to download WikiSection dataset")
+        
+        # Run comparative evaluation
+        results = evaluator.run_comparative_evaluation(subsets, sample_size)
+        
+        # Add baseline comparison if requested
+        if include_baseline and results:
+            # Use first subset for baseline comparison
+            first_subset = list(results.keys())[0]
+            documents = evaluator.load_wikisection_data(first_subset)
+            
+            if documents:
+                baseline_comparison = evaluator.compare_with_baseline(
+                    documents[:sample_size], baseline_chunk_size
+                )
+                
+                # Add baseline to results
+                results[f"{first_subset}_baseline"] = baseline_comparison["baseline"]
+        
+        # Format results for API response
+        formatted_results = {}
+        for subset_name, result in results.items():
+            formatted_results[subset_name] = {
+                "precision": result.precision,
+                "recall": result.recall,
+                "f1_score": result.f1_score,
+                "total_documents": result.total_documents,
+                "boundary_accuracy": f"{result.correct_boundaries}/{result.total_boundaries}",
+                "boundary_accuracy_percent": round(result.correct_boundaries/result.total_boundaries*100, 2) if result.total_boundaries > 0 else 0.0,
+                "dataset_name": result.dataset_name,
+                "chunking_method": result.chunking_method
+            }
+        
+        # Generate report
+        report = format_evaluation_report(results)
+        
+        return {
+            "evaluation_type": "WikiSection Comparative",
+            "subsets_evaluated": subsets,
+            "sample_size": sample_size,
+            "include_baseline": include_baseline,
+            "results": formatted_results,
+            "summary_report": report,
+            "comparison": {
+                "best_f1": max(r.f1_score for r in results.values()),
+                "best_precision": max(r.precision for r in results.values()),
+                "best_recall": max(r.recall for r in results.values())
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Comparative evaluation failed: {str(e)}")
+
+@app.get("/evaluate/chunking/status")
+async def get_chunking_evaluation_status():
+    """Get status of chunking evaluation system."""
+    try:
+        evaluator = WikiSectionEvaluator(data_dir="./evaluation_data")
+        
+        # Check if dataset is available
+        dataset_available = os.path.exists(os.path.join(evaluator.data_dir, "wikisection"))
+        
+        available_subsets = []
+        if dataset_available:
+            # Check for files in both possible locations
+            for file in os.listdir(evaluator.data_dir):
+                if file.startswith('wikisection_') and file.endswith('.json'):
+                    # Extract subset name from filename like "wikisection_en_disease_train.json"
+                    parts = file.replace('.json', '').split('_')
+                    if len(parts) >= 3:
+                        subset_name = '_'.join(parts[1:-1])  # Get everything between 'wikisection' and 'train/test/validation'
+                        if subset_name not in available_subsets:
+                            available_subsets.append(subset_name)
+            
+            # Also check the wikisection subdirectory if it exists
+            wikisection_dir = os.path.join(evaluator.data_dir, "wikisection")
+            if os.path.exists(wikisection_dir):
+                for file in os.listdir(wikisection_dir):
+                    if file.endswith('.json'):
+                        subset_name = file.replace('.json', '')
+                        if subset_name not in available_subsets:
+                            available_subsets.append(subset_name)
+        
+        return {
+            "evaluation_system": "WikiSection",
+            "dataset_available": dataset_available,
+            "data_directory": evaluator.data_dir,
+            "available_subsets": available_subsets,
+            "semantic_chunker": "all-MiniLM-L6-v2",
+            "supported_metrics": ["precision", "recall", "f1_score", "boundary_accuracy"],
+            "dataset_info": {
+                "total_subsets": len(available_subsets),
+                "languages": ["en", "de"],
+                "domains": ["disease", "city"]
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
 # NER Integration Endpoints
 

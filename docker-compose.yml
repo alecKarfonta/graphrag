@@ -36,6 +36,7 @@ services:
       - api_models:/app/models
       - api_documents:/app/documents
       - api_exports:/app/exports
+      - evaluation_data:/app/evaluation_data
     networks:
       - graphrag-network
     restart: unless-stopped
@@ -48,7 +49,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://192.168.1.196:8000
+      - REACT_APP_API_URL=https://mlapi.us/graphrag/api
+      - PUBLIC_URL=/graphrag
     depends_on:
       - api
     volumes:
@@ -224,6 +226,10 @@ volumes:
   reddit_crawler_logs:
     driver: local
   reddit_crawler_cache:
+    driver: local
+  
+  # Evaluation data storage
+  evaluation_data:
     driver: local
 
 networks:

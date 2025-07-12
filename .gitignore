@@ -100,4 +100,7 @@ ingestion_result.json
 
 # Backup files
 *.bak
-backups/ 
+backups/ # Evaluation datasets - these are downloaded automatically
+backend/test_evaluation_data/
+backend/evaluation_data/
+**/evaluation_data/
