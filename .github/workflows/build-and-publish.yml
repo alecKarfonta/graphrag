@@ -33,16 +33,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Debug - List files
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "Files in root:"
-          ls -la
-          echo "Files in frontend:"
-          ls -la frontend/
-          echo "Content of frontend/Dockerfile:"
-          head -5 frontend/Dockerfile
-
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
@@ -56,7 +46,7 @@ jobs:
       - name: Build and push Frontend image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./frontend
           file: ./frontend/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ghcr.io/${{ env.REPOSITORY_OWNER_LOWERCASE }}/graphrag-frontend:${{ github.sha }}
