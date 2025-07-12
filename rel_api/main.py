@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import numpy as np
 import traceback
+import torch
 
 # GLiNER imports
 from gliner import GLiNER
@@ -114,22 +115,37 @@ DEFAULT_RELATION_TYPES = [
 
 gliner_model = None
 model_info = {}
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_gliner_model():
-    """Load the GLiNER model."""
+    """Load the GLiNER model with GPU support."""
     global gliner_model, model_info
     
     try:
         logger.info("Loading GLiNER model...")
+        logger.info(f"Device detected: {device}")
         
         # Initialize GLiNER model
         gliner_model = GLiNER.from_pretrained("knowledgator/gliner-multitask-large-v0.5")
+        
+        # Move model to GPU if available
+        if torch.cuda.is_available():
+            logger.info(f"Moving GLiNER model to GPU: {torch.cuda.get_device_name(0)}")
+            gliner_model = gliner_model.to(device)
+            # Set model to evaluation mode for inference
+            gliner_model.eval()
+        else:
+            logger.info("CUDA not available, using CPU")
         
         # Store model info
         model_info = {
             "model_name": "knowledgator/gliner-multitask-large-v0.5",
             "model_type": "gliner-multitask",
             "framework": "GLiNER",
+            "device": str(device),
+            "cuda_available": torch.cuda.is_available(),
+            "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
             "capabilities": [
                 "Named Entity Recognition (NER)",
                 "Relation Extraction",
@@ -142,6 +158,8 @@ def load_gliner_model():
         }
         
         logger.info("✅ GLiNER model loaded successfully")
+        if torch.cuda.is_available():
+            logger.info(f"✅ Model running on GPU: {torch.cuda.get_device_name(0)}")
         return True
         
     except Exception as e:
@@ -361,51 +379,55 @@ async def extract_relations(request: RelationRequest):
 @app.post("/extract-relations/batch", response_model=BatchRelationResponse)
 async def extract_relations_batch(request: BatchRelationRequest):
     """Extract relationships from multiple texts in batch."""
-    if pipe is None:
-        raise HTTPException(status_code=503, detail="GLiNER pipeline not loaded")
+    if gliner_model is None:
+        raise HTTPException(status_code=503, detail="GLiNER model not loaded")
     
     try:
         start_time = datetime.now()
         results = []
         
         # Use provided entity_labels or default
-        if request.entity_labels:
-            entity_labels = request.entity_labels + DEFAULT_ENTITY_LABELS
-        else:
-            entity_labels = DEFAULT_ENTITY_LABELS
+        entity_labels = request.entity_labels if request.entity_labels else DEFAULT_ENTITY_LABELS
         
         # Use provided relations or default
-        if request.relations:
-            relations = request.relations + DEFAULT_RELATION_TYPES
-        else:
-            relations = DEFAULT_RELATION_TYPES
+        relations = request.relations if request.relations else DEFAULT_RELATION_TYPES
         
         for text in request.texts:
             try:
-                # Prepare input for UTCA pipeline
-                pipeline_input = {
-                    "text": text,
-                    "labels": entity_labels,
-                    "relations": relations
-                }
+                # Extract entities first using GLiNER
+                entities = gliner_model.predict_entities(text, entity_labels, threshold=request.threshold)
                 
-                # Run the UTCA pipeline
-                result = pipe.run(pipeline_input)
-                
-                # Process the pipeline output
+                # Create relationships based on entity pairs and relation definitions
                 processed_relations = []
-                if "output" in result:
-                    for relation in result["output"]:
-                        processed_relation = {
-                            "source": relation.get("source", ""),
-                            "target": relation.get("target", ""),
-                            "label": relation.get("relation", ""),
-                            "score": relation.get("score", 0.5),
-                            "context": relation.get("context", ""),
-                            "source_type": relation.get("source_type", "entity"),
-                            "target_type": relation.get("target_type", "entity")
-                        }
-                        processed_relations.append(processed_relation)
+                for relation_def in relations:
+                    relation_type = relation_def.get("relation", "")
+                    pairs_filter = relation_def.get("pairs_filter", [])
+                    distance_threshold = relation_def.get("distance_threshold", 100)
+                    
+                    # Find entity pairs that match the filter
+                    for i, entity1 in enumerate(entities):
+                        for j, entity2 in enumerate(entities[i+1:], i+1):
+                            # Check if this pair matches the filter
+                            if _matches_pairs_filter(entity1, entity2, pairs_filter):
+                                # Calculate distance between entities
+                                distance = abs(entity1.get("start", 0) - entity2.get("start", 0))
+                                
+                                if distance <= distance_threshold:
+                                    # Extract context around both entities
+                                    context_start = max(0, min(entity1.get("start", 0), entity2.get("start", 0)) - 50)
+                                    context_end = min(len(text), max(entity1.get("end", 0), entity2.get("end", 0)) + 50)
+                                    context = text[context_start:context_end]
+                                    
+                                    relation = {
+                                        "source": entity1.get("text", ""),
+                                        "target": entity2.get("text", ""),
+                                        "label": relation_type,
+                                        "score": min(entity1.get("score", 0.5), entity2.get("score", 0.5)),
+                                        "context": context,
+                                        "source_type": entity1.get("label", "entity"),
+                                        "target_type": entity2.get("label", "entity")
+                                    }
+                                    processed_relations.append(relation)
                 
                 results.append({
                     "text": text,

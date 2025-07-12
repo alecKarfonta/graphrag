@@ -11,59 +11,90 @@ class EnhancedDocumentProcessor:
     def __init__(self):
         self.document_processor = DocumentProcessor()
         self.semantic_chunker = SemanticChunker()
-        # Load spaCy model for NLP tasks
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            # Fallback if model not installed
-            self.nlp = None
+        # Load spaCy model for NLP tasks - no fallback, let it fail if not installed
+        self.nlp = spacy.load("en_core_web_sm")
     
     def process_document_enhanced(self, file_path: str, use_semantic_chunking: bool = True) -> List[DocumentChunk]:
         """Process document with enhanced features."""
-        # Get basic chunks from document processor
-        basic_chunks = self.document_processor.process_document(file_path)
+        # Always use semantic chunking - no fallback to basic processing
         
-        if not use_semantic_chunking:
-            return basic_chunks
+        # Extract metadata
+        metadata = self.document_processor.extract_metadata(file_path)
         
-        # Apply semantic chunking to each basic chunk
+        # Get document content based on file type - let errors bubble up
+        content = self._extract_document_content(file_path)
+        
+        if not content.strip():
+            raise ValueError(f"No content extracted from document: {file_path}")
+        
+        # Determine content type for the whole document
+        content_type = self._classify_content_type(content)
+        
+        # Apply semantic chunking to the entire document content
+        semantic_chunks = self.semantic_chunker.create_adaptive_chunks(
+            content, content_type
+        )
+        
+        # Create enhanced chunks with semantic boundaries
         enhanced_chunks = []
-        for chunk in basic_chunks:
-            # Determine content type for adaptive chunking
-            content_type = self._classify_content_type(chunk.text)
-            
-            # Create semantic chunks
-            semantic_chunks = self.semantic_chunker.create_adaptive_chunks(
-                chunk.text, content_type
+        for i, semantic_chunk in enumerate(semantic_chunks):
+            enhanced_chunk = DocumentChunk(
+                text=semantic_chunk,
+                chunk_id=f"{file_path}_semantic_{i}",
+                source_file=file_path,
+                page_number=None,  # We don't have page info for whole-document chunking
+                section_header=None,
+                chunk_index=i,
+                metadata=self._enhance_metadata(metadata.__dict__ if metadata else {}, semantic_chunk)
             )
-            
-            # Create enhanced chunks with semantic boundaries
-            for i, semantic_chunk in enumerate(semantic_chunks):
-                enhanced_chunk = DocumentChunk(
-                    text=semantic_chunk,
-                    chunk_id=f"{chunk.chunk_id}_semantic_{i}",
-                    source_file=chunk.source_file,
-                    page_number=chunk.page_number,
-                    section_header=chunk.section_header,
-                    chunk_index=chunk.chunk_index,
-                    metadata=self._enhance_metadata(chunk.metadata, semantic_chunk)
-                )
-                enhanced_chunks.append(enhanced_chunk)
+            enhanced_chunks.append(enhanced_chunk)
         
         return enhanced_chunks
+    
+    def _extract_document_content(self, file_path: str) -> str:
+        """Extract text content from document based on file type."""
+        import os
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            # For PDFs, extract text using PyMuPDF - no fallback
+            import fitz
+            doc = fitz.open(file_path)
+            content = ""
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                content += page.get_text() + "\n"
+            doc.close()
+            return content
+        
+        elif file_ext in ['.docx']:
+            # For DOCX, extract text using python-docx - no fallback
+            from docx import Document as DocxDocument
+            doc = DocxDocument(file_path)
+            content = ""
+            for paragraph in doc.paragraphs:
+                content += paragraph.text + "\n"
+            return content
+        
+        elif file_ext in ['.html', '.htm']:
+            # For HTML, extract text using BeautifulSoup - no fallback
+            from bs4 import BeautifulSoup
+            with open(file_path, 'r', encoding='utf-8') as f:
+                soup = BeautifulSoup(f.read(), 'html.parser')
+                return soup.get_text(separator='\n', strip=True)
+        
+        else:
+            # For text-based files (txt, md, etc.) - no fallback
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
     
     def extract_enhanced_metadata(self, file_path: str) -> DocumentMetadata:
         """Extract enhanced metadata including content analysis."""
         metadata = self.document_processor.extract_metadata(file_path)
         
-        # Read file content for analysis
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            # Try with different encoding
-            with open(file_path, 'r', encoding='latin-1') as f:
-                content = f.read()
+        # Read file content for analysis - no fallback
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
         
         # Extract additional metadata
         metadata.sections = self._extract_sections(content)
@@ -200,11 +231,8 @@ class EnhancedDocumentProcessor:
         results = {}
         
         for file_path in file_paths:
-            try:
-                chunks = self.process_document_enhanced(file_path, use_semantic_chunking)
-                results[file_path] = chunks
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
-                results[file_path] = []
+            # No exception handling - let errors bubble up
+            chunks = self.process_document_enhanced(file_path, use_semantic_chunking)
+            results[file_path] = chunks
         
         return results 
