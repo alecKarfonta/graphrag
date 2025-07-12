@@ -157,14 +157,14 @@ jobs:
       - name: Start test services
         run: |
           # Start core services needed for tests
-          docker-compose -f docker-compose.yml up -d neo4j qdrant redis
+          docker compose -f docker-compose.yml up -d neo4j qdrant redis
           
           # Wait for services to be ready
           echo "Waiting for services to start..."
           sleep 30
           
           # Check service health
-          docker-compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml ps
 
       - name: Run unit tests
         run: |
@@ -176,7 +176,7 @@ jobs:
       - name: Start application services for integration tests
         run: |
           # Start main application services
-          docker-compose -f docker-compose.yml up -d api
+          docker compose -f docker-compose.yml up -d api
           
           # Wait for API to be ready
           echo "Waiting for API to start..."
@@ -204,10 +204,10 @@ jobs:
         run: |
           echo "Test run completed"
           echo "Check logs for any failures"
-          docker-compose -f docker-compose.yml logs --tail=100 api
+          docker compose -f docker-compose.yml logs --tail=100 api
 
       - name: Cleanup test environment
         if: always()
         run: |
           echo "Cleaning up test environment..."
-          docker-compose -f docker-compose.yml down --volumes --remove-orphans 
+          docker compose -f docker-compose.yml down --volumes --remove-orphans 
