@@ -23,6 +23,14 @@ except ImportError:
     FILTERING_AVAILABLE = False
     print("Two-stage filtering not available. Using standard retrieval.")
 
+# Import the contextual enhancer
+try:
+    from contextual_enhancer import ContextualEnhancer
+    CONTEXTUAL_ENHANCEMENT_AVAILABLE = True
+except ImportError:
+    CONTEXTUAL_ENHANCEMENT_AVAILABLE = False
+    print("Contextual enhancement not available. Using standard chunk processing.")
+
 @dataclass
 class SearchResult:
     """Represents a search result with metadata."""
@@ -61,6 +69,14 @@ class HybridRetriever:
             self.bm25 = None
             print("⚠️ Contextual BM25 not available, using fallback keyword search")
         
+        # Initialize contextual enhancer
+        if CONTEXTUAL_ENHANCEMENT_AVAILABLE:
+            self.contextual_enhancer = ContextualEnhancer(context_window_size=200)
+            print("✅ Contextual enhancement initialized")
+        else:
+            self.contextual_enhancer = None
+            print("⚠️ Contextual enhancement not available, using standard chunk processing")
+        
         # Initialize collection if it doesn't exist
         self._init_collection()
     
@@ -86,7 +102,7 @@ class HybridRetriever:
             print("Qdrant collection will be created when first needed.")
     
     def add_document_chunks(self, chunks: List[Dict[str, Any]]):
-        """Add document chunks to the vector store and BM25 index."""
+        """Add document chunks to the vector store and BM25 index with contextual enhancement."""
         if not chunks:
             return
         
@@ -97,24 +113,44 @@ class HybridRetriever:
             print(f"Could not initialize collection for adding chunks: {e}")
             return
         
-        # Prepare points for Qdrant
-        points = []
-        for i, chunk in enumerate(chunks):
-            # Generate embedding
-            embedding = self.embedding_model.encode(chunk["text"]).tolist()
-            
-            # Create point
-            point = PointStruct(
-                id=i,
-                vector=embedding,
-                payload={
-                    "text": chunk["text"],
-                    "chunk_id": chunk.get("chunk_id", f"chunk_{i}"),
-                    "source_file": chunk.get("source_file", "unknown"),
-                    "metadata": chunk.get("metadata", {})
-                }
-            )
-            points.append(point)
+        # Apply contextual enhancement if available
+        if self.contextual_enhancer and CONTEXTUAL_ENHANCEMENT_AVAILABLE:
+            try:
+                enhanced_chunks = self.contextual_enhancer.enhance_chunks_for_embedding(chunks)
+                print(f"✅ Enhanced {len(enhanced_chunks)} chunks with contextual information")
+                
+                # Prepare points for Qdrant with enhanced embeddings
+                points = []
+                for i, enhanced_chunk in enumerate(enhanced_chunks):
+                    # Generate embedding from enhanced text
+                    embedding = self.embedding_model.encode(enhanced_chunk.enhanced_text).tolist()
+                    
+                    # Create point with enhanced metadata
+                    point = PointStruct(
+                        id=i,
+                        vector=embedding,
+                        payload={
+                            "text": enhanced_chunk.original_text,  # Store original text for display
+                            "enhanced_text": enhanced_chunk.enhanced_text,  # Store enhanced text
+                            "chunk_id": chunks[i].get("chunk_id", f"chunk_{i}"),
+                            "source_file": chunks[i].get("source_file", "unknown"),
+                            "metadata": {
+                                **chunks[i].get("metadata", {}),
+                                "context_type": enhanced_chunk.context_type,
+                                "enhancement_metadata": enhanced_chunk.enhancement_metadata
+                            }
+                        }
+                    )
+                    points.append(point)
+                    
+            except Exception as e:
+                print(f"⚠️ Contextual enhancement failed: {e}")
+                print("Falling back to standard chunk processing...")
+                # Fall back to standard processing
+                points = self._prepare_standard_points(chunks)
+        else:
+            # Standard processing without contextual enhancement
+            points = self._prepare_standard_points(chunks)
         
         # Upload to Qdrant
         try:
@@ -130,6 +166,27 @@ class HybridRetriever:
                 
         except Exception as e:
             print(f"Error adding chunks to vector store: {e}")
+    
+    def _prepare_standard_points(self, chunks: List[Dict[str, Any]]) -> List[PointStruct]:
+        """Prepare standard points for Qdrant without contextual enhancement."""
+        points = []
+        for i, chunk in enumerate(chunks):
+            # Generate embedding from original text
+            embedding = self.embedding_model.encode(chunk["text"]).tolist()
+            
+            # Create point
+            point = PointStruct(
+                id=i,
+                vector=embedding,
+                payload={
+                    "text": chunk["text"],
+                    "chunk_id": chunk.get("chunk_id", f"chunk_{i}"),
+                    "source_file": chunk.get("source_file", "unknown"),
+                    "metadata": chunk.get("metadata", {})
+                }
+            )
+            points.append(point)
+        return points
     
     def analyze_query(self, query: str) -> QueryAnalysis:
         """Analyze query to determine intent and extract entities/keywords."""
