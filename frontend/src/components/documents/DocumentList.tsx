@@ -7,6 +7,7 @@ const DocumentList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingDoc, setDeletingDoc] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
   useEffect(() => {
     loadDocuments();
@@ -41,6 +42,45 @@ const DocumentList: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
     } finally {
       setDeletingDoc(null);
+    }
+  };
+
+  const handleClearAllData = async () => {
+    // eslint-disable-next-line no-restricted-globals
+    const confirmed = window.confirm(
+      '⚠️ Are you sure you want to clear ALL data?\n\n' +
+      'This will permanently delete:\n' +
+      '• All documents from vector store\n' +
+      '• All entities from knowledge graph\n' +
+      '• All relationships between entities\n' +
+      '• All document chunks and embeddings\n\n' +
+      'This action cannot be undone!'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setClearingAll(true);
+      setError(null);
+      
+      await apiService.clearAllData();
+      
+      // Clear the documents list since everything was deleted
+      setDocuments([]);
+      
+      // Show success message
+      alert('✅ All data has been successfully cleared!\n\n' +
+            '• Vector store: Cleared\n' +
+            '• Knowledge graph: Cleared\n\n' +
+            'You can now upload new documents to start fresh.');
+      
+    } catch (err) {
+      console.error('Failed to clear all data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to clear all data');
+    } finally {
+      setClearingAll(false);
     }
   };
 
@@ -114,15 +154,43 @@ const DocumentList: React.FC = () => {
               Manage your uploaded documents and view processing status.
             </p>
           </div>
-          <button
-            onClick={loadDocuments}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh
-          </button>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={loadDocuments}
+              disabled={clearingAll}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+            
+            {documents.length > 0 && (
+              <button
+                onClick={handleClearAllData}
+                disabled={clearingAll}
+                className="inline-flex items-center px-3 py-2 border border-red-300 dark:border-red-600 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {clearingAll ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Clearing All Data...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear All Data
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -147,7 +215,6 @@ const DocumentList: React.FC = () => {
         </div>
       )}
 
-      {/* Documents List */}
       {documents.length === 0 ? (
         <div className="text-center py-12">
           <div className="mx-auto w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
@@ -207,38 +274,17 @@ const DocumentList: React.FC = () => {
                     </div>
 
                     {/* Processing Stats */}
-                    {(doc.chunks || doc.entities || doc.relationships) && (
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {doc.chunks && (
-                          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {doc.chunks}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              Text Chunks
-                            </div>
-                          </div>
-                        )}
-                        {doc.entities && (
-                          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {doc.entities}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              Entities
-                            </div>
-                          </div>
-                        )}
-                        {doc.relationships && (
-                          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {doc.relationships}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              Relationships
-                            </div>
-                          </div>
-                        )}
+                    {doc.status === 'completed' && (
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="text-blue-600 dark:text-blue-400">
+                          <span className="font-medium">Chunks:</span> {doc.chunks || 0}
+                        </div>
+                        <div className="text-green-600 dark:text-green-400">
+                          <span className="font-medium">Entities:</span> {doc.entities || 0}
+                        </div>
+                        <div className="text-purple-600 dark:text-purple-400">
+                          <span className="font-medium">Relationships:</span> {doc.relationships || 0}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -247,7 +293,7 @@ const DocumentList: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => handleDeleteDocument(doc.name)}
-                    disabled={deletingDoc === doc.name}
+                    disabled={deletingDoc === doc.name || clearingAll}
                     className="inline-flex items-center px-3 py-2 border border-red-300 dark:border-red-600 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {deletingDoc === doc.name ? (
