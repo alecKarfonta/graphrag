@@ -37,6 +37,7 @@ markdown==3.5.1
 
 # Text processing
 nltk==3.8.1
+rank_bm25>=0.2.2
 
 # Graph analysis and machine learning
 networkx==3.3
