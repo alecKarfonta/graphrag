@@ -31,6 +31,14 @@ except ImportError:
     CONTEXTUAL_ENHANCEMENT_AVAILABLE = False
     print("Contextual enhancement not available. Using standard chunk processing.")
 
+# Import the new contextual embedder
+try:
+    from contextual_embeddings import ContextualEmbedder
+    CONTEXTUAL_EMBEDDINGS_AVAILABLE = True
+except ImportError:
+    CONTEXTUAL_EMBEDDINGS_AVAILABLE = False
+    print("Contextual embeddings not available. Using standard embeddings.")
+
 @dataclass
 class SearchResult:
     """Represents a search result with metadata."""
@@ -56,6 +64,18 @@ class HybridRetriever:
         self.qdrant_client = QdrantClient(url=qdrant_url)
         self.collection_name = collection_name
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        
+        # Initialize contextual embedder if available
+        if CONTEXTUAL_EMBEDDINGS_AVAILABLE:
+            self.contextual_embedder = ContextualEmbedder(
+                model_name="all-MiniLM-L6-v2",
+                context_window_size=200,
+                max_context_length=512
+            )
+            print("✅ Contextual embedder initialized")
+        else:
+            self.contextual_embedder = None
+            print("⚠️ Contextual embedder not available, using standard embeddings")
         
         # Initialize two-stage filtering system
         try:
@@ -126,43 +146,64 @@ class HybridRetriever:
             print(f"Could not initialize collection for adding chunks: {e}")
             return
         
-        # Apply contextual enhancement if available
-        if self.contextual_enhancer and CONTEXTUAL_ENHANCEMENT_AVAILABLE:
+        # Use contextual embeddings if available (preferred over basic contextual enhancement)
+        if self.contextual_embedder and CONTEXTUAL_EMBEDDINGS_AVAILABLE:
             try:
-                enhanced_chunks = self.contextual_enhancer.enhance_chunks_for_embedding(chunks)
-                print(f"✅ Enhanced {len(enhanced_chunks)} chunks with contextual information")
+                # Group chunks by document for contextual embedding
+                document_groups = self._group_chunks_by_document(chunks)
                 
-                # Prepare points for Qdrant with enhanced embeddings
-                points = []
-                for i, enhanced_chunk in enumerate(enhanced_chunks):
-                    # Generate embedding from enhanced text
-                    embedding = self.embedding_model.encode(enhanced_chunk.enhanced_text).tolist()
-                    
-                    # Create point with enhanced metadata
-                    point = PointStruct(
-                        id=i,
-                        vector=embedding,
-                        payload={
-                            "text": enhanced_chunk.original_text,  # Store original text for display
-                            "enhanced_text": enhanced_chunk.enhanced_text,  # Store enhanced text
-                            "chunk_id": chunks[i].get("chunk_id", f"chunk_{i}"),
-                            "source_file": chunks[i].get("source_file", "unknown"),
-                            "metadata": {
-                                **chunks[i].get("metadata", {}),
-                                "context_type": enhanced_chunk.context_type,
-                                "enhancement_metadata": enhanced_chunk.enhancement_metadata
-                            }
-                        }
+                all_points = []
+                for doc_name, doc_chunks in document_groups.items():
+                    # Generate contextual embeddings for this document
+                    contextual_embeddings = self.contextual_embedder.embed_document_chunks(
+                        doc_chunks, doc_name
                     )
-                    points.append(point)
                     
+                    print(f"✅ Generated {len(contextual_embeddings)} contextual embeddings for {doc_name}")
+                    
+                    # Convert to Qdrant points
+                    for i, contextual_embedding in enumerate(contextual_embeddings):
+                        point = PointStruct(
+                            id=len(all_points) + i,
+                            vector=contextual_embedding.embedding.tolist(),
+                            payload={
+                                "text": contextual_embedding.original_text,
+                                "enhanced_text": contextual_embedding.enhanced_text,
+                                "chunk_id": contextual_embedding.chunk_context.chunk_id,
+                                "source_file": doc_name,
+                                "metadata": {
+                                    **contextual_embedding.chunk_context.metadata,
+                                    "document_context": {
+                                        "document_type": contextual_embedding.document_context.document_type,
+                                        "domain": contextual_embedding.document_context.domain,
+                                        "technical_level": contextual_embedding.document_context.technical_level,
+                                        "main_topics": contextual_embedding.document_context.main_topics
+                                    },
+                                    "chunk_context": {
+                                        "content_type": contextual_embedding.chunk_context.content_type,
+                                        "chunk_position": contextual_embedding.chunk_context.chunk_position,
+                                        "importance_score": contextual_embedding.chunk_context.importance_score,
+                                        "key_entities": contextual_embedding.chunk_context.key_entities
+                                    },
+                                    "embedding_metadata": contextual_embedding.embedding_metadata
+                                }
+                            }
+                        )
+                        all_points.append(point)
+                
+                points = all_points
+                
             except Exception as e:
-                print(f"⚠️ Contextual enhancement failed: {e}")
-                print("Falling back to standard chunk processing...")
-                # Fall back to standard processing
-                points = self._prepare_standard_points(chunks)
+                print(f"⚠️ Contextual embeddings failed: {e}")
+                print("Falling back to standard contextual enhancement...")
+                # Fall back to standard contextual enhancement
+                points = self._prepare_contextual_enhanced_points(chunks)
+        
+        # Fall back to basic contextual enhancement if contextual embeddings not available
+        elif self.contextual_enhancer and CONTEXTUAL_ENHANCEMENT_AVAILABLE:
+            points = self._prepare_contextual_enhanced_points(chunks)
         else:
-            # Standard processing without contextual enhancement
+            # Standard processing without any contextual enhancement
             points = self._prepare_standard_points(chunks)
         
         # Upload to Qdrant
@@ -179,6 +220,54 @@ class HybridRetriever:
                 
         except Exception as e:
             print(f"Error adding chunks to vector store: {e}")
+    
+    def _group_chunks_by_document(self, chunks: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Group chunks by their source document."""
+        document_groups = {}
+        
+        for chunk in chunks:
+            doc_name = chunk.get('source_file', 'unknown')
+            if doc_name not in document_groups:
+                document_groups[doc_name] = []
+            document_groups[doc_name].append(chunk)
+            
+        return document_groups
+    
+    def _prepare_contextual_enhanced_points(self, chunks: List[Dict[str, Any]]) -> List[PointStruct]:
+        """Prepare points using basic contextual enhancement."""
+        try:
+            enhanced_chunks = self.contextual_enhancer.enhance_chunks_for_embedding(chunks)
+            print(f"✅ Enhanced {len(enhanced_chunks)} chunks with contextual information")
+            
+            points = []
+            for i, enhanced_chunk in enumerate(enhanced_chunks):
+                # Generate embedding from enhanced text
+                embedding = self.embedding_model.encode(enhanced_chunk.enhanced_text).tolist()
+                
+                # Create point with enhanced metadata
+                point = PointStruct(
+                    id=i,
+                    vector=embedding,
+                    payload={
+                        "text": enhanced_chunk.original_text,  # Store original text for display
+                        "enhanced_text": enhanced_chunk.enhanced_text,  # Store enhanced text
+                        "chunk_id": chunks[i].get("chunk_id", f"chunk_{i}"),
+                        "source_file": chunks[i].get("source_file", "unknown"),
+                        "metadata": {
+                            **chunks[i].get("metadata", {}),
+                            "context_type": enhanced_chunk.context_type,
+                            "enhancement_metadata": enhanced_chunk.enhancement_metadata
+                        }
+                    }
+                )
+                points.append(point)
+            
+            return points
+            
+        except Exception as e:
+            print(f"⚠️ Contextual enhancement failed: {e}")
+            print("Falling back to standard processing...")
+            return self._prepare_standard_points(chunks)
     
     def _prepare_standard_points(self, chunks: List[Dict[str, Any]]) -> List[PointStruct]:
         """Prepare standard points for Qdrant without contextual enhancement."""

@@ -66,7 +66,7 @@ GraphRAG's hybrid approach should outperform pure vector search by leveraging:
 
 #### Checklist:
 - [x] **Add explanatory context to chunks** before embedding
-- [ ] **Implement contextual embeddings** with document-specific context
+- [x] **Implement contextual embeddings** with document-specific context
 - [x] **Integrate contextual BM25** for lexical + semantic matching
 - [ ] **Create chunk preprocessing pipeline** for context enhancement
 - [ ] **Test context template variations** for optimal performance
