@@ -57,9 +57,22 @@ class HybridRetriever:
         self.collection_name = collection_name
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         
-        # Disable two-stage filtering - it was hurting performance
-        self.filter = None
-        print("✅ Two-stage filtering disabled (performance was degraded)")
+        # Initialize two-stage filtering system
+        try:
+            from two_stage_filtering import TwoStageFilter
+            self.filter = TwoStageFilter(
+                relevance_threshold=0.3,
+                quality_threshold=0.5,
+                confidence_threshold=0.6,
+                max_chunks=10
+            )
+            print("✅ Two-stage filtering initialized")
+        except ImportError as e:
+            print(f"⚠️ Two-stage filtering not available: {e}")
+            self.filter = None
+        except Exception as e:
+            print(f"⚠️ Two-stage filtering initialization failed: {e}")
+            self.filter = None
         
         # Initialize contextual BM25 system
         if BM25_AVAILABLE:
