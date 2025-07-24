@@ -27,12 +27,23 @@ def test_api_endpoint(endpoint: str, data: Dict[str, Any], description: str) -> 
     print(f"Data: {data}")
     
     try:
-        response = requests.post(f"{API_BASE}/{endpoint}", params=data)
+        # First check if API is reachable
+        health_response = requests.get(f"{BASE_URL}/health", timeout=10)
+        if health_response.status_code != 200:
+            print(f"❌ API health check failed: {health_response.status_code}")
+            return {"error": f"API not available: {health_response.status_code}"}
+        
+        # Set a longer timeout for complex processing
+        response = requests.post(f"{API_BASE}/{endpoint}", json=data, timeout=90)
         
         if response.status_code == 200:
             result = response.json()
             print(f"✅ Success: {description}")
-            print(f"Response: {json.dumps(result, indent=2)}")
+            # Only show first 500 chars of response to avoid overwhelming output
+            response_preview = json.dumps(result, indent=2)[:500]
+            if len(response_preview) == 500:
+                response_preview += "..."
+            print(f"Response: {response_preview}")
             return result
         else:
             print(f"❌ Error: {response.status_code}")

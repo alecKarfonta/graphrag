@@ -1,0 +1,30 @@
+{
+  "evaluation_type": "GutenQA",
+  "book_name": "A_Christmas_Carol_-_Charles_Dickens",
+  "max_questions": 20,
+  "method": "both",
+  "results": {
+    "baseline": {
+      "dcg_at_1": 0.45,
+      "dcg_at_2": 0.45,
+      "dcg_at_5": 0.5180676558073393,
+      "dcg_at_10": 0.5482941409625202,
+      "dcg_at_20": 0.5747412882450766,
+      "total_questions": 20,
+      "correct_retrievals": 9,
+      "accuracy": 0.45,
+      "retrieval_method": "contriever_baseline"
+    },
+    "hybrid": {
+      "dcg_at_1": 0.7,
+      "dcg_at_2": 0.7630929753571458,
+      "dcg_at_5": 0.7846268032608155,
+      "dcg_at_10": 0.8012934699274821,
+      "dcg_at_20": 0.8012934699274821,
+      "total_questions": 20,
+      "correct_retrievals": 14,
+      "accuracy": 0.7,
+      "retrieval_method": "hybrid_retriever"
+    }
+  }
+}

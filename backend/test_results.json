@@ -102,21 +102,21 @@
     "results": {
       "entity_extraction_performance": {
         "test_name": "entity_extraction_performance",
-        "total_time": 1.311537265777588,
-        "avg_time_per_doc": 0.4371790885925293,
+        "total_time": 0.19782114028930664,
+        "avg_time_per_doc": 0.06594038009643555,
         "documents_processed": 3,
         "performance_acceptable": true
       },
       "query_response_time": {
         "test_name": "query_response_time",
-        "avg_response_time": 0.016133626302083332,
-        "max_response_time": 0.016722440719604492,
-        "min_response_time": 0.015777587890625,
+        "avg_response_time": 0.014914353688557943,
+        "max_response_time": 0.0172727108001709,
+        "min_response_time": 0.013206958770751953,
         "performance_acceptable": true
       },
       "graph_construction_performance": {
         "test_name": "graph_construction_performance",
-        "construction_time": 7.3909759521484375e-06,
+        "construction_time": 6.67572021484375e-06,
         "performance_acceptable": true
       },
       "memory_usage": {
@@ -126,12 +126,12 @@
       },
       "concurrent_requests": {
         "test_name": "concurrent_requests",
-        "avg_concurrent_time": 0.04622936248779297,
-        "max_concurrent_time": 0.04705500602722168,
+        "avg_concurrent_time": 0.04528347651163737,
+        "max_concurrent_time": 0.05176830291748047,
         "performance_acceptable": true
       }
     },
-    "avg_response_time": 0.016133626302083332,
+    "avg_response_time": 0.014914353688557943,
     "performance_score": 0.8
   },
   "quality_tests": {
@@ -146,15 +146,15 @@
       "query_response_accuracy": {
         "test_name": "query_response_accuracy",
         "accuracy": 0.04786324786324786,
-        "avg_response_time": 2.0341294606526694,
+        "avg_response_time": 0.08397197723388672,
         "performance_acceptable": "False"
       },
       "graph_completeness": {
         "test_name": "graph_completeness",
-        "total_nodes": 0,
-        "total_relationships": 0,
-        "graph_density": 0,
-        "performance_acceptable": false
+        "total_nodes": 494,
+        "total_relationships": 9659,
+        "graph_density": 0.03966051030212448,
+        "performance_acceptable": true
       },
       "retrieval_relevance": {
         "test_name": "retrieval_relevance",
@@ -166,6 +166,6 @@
     "avg_accuracy": 0.08262108262108261,
     "quality_score": 0.08262108262108261
   },
-  "total_execution_time": 18.866265535354614,
+  "total_execution_time": 1.8811655044555664,
   "overall_score": 0.7015242165242165
 }

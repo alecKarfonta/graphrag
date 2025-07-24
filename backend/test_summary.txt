@@ -1,7 +1,7 @@
 ================================================================================
 GRAPH RAG SYSTEM TEST SUMMARY
 ================================================================================
-Generated: 2025-07-09 18:05:49
+Generated: 2025-07-24 01:35:02
 
 UNIT TESTS
 --------------------
@@ -17,7 +17,7 @@ Success Rate: 75.0%
 
 PERFORMANCE TESTS
 --------------------
-Average Response Time: 0.02s
+Average Response Time: 0.01s
 Performance Score: 80.0%
 
 QUALITY TESTS
